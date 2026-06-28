@@ -1,0 +1,70 @@
+# AURA AUV - SITL + QGC JOYSTICK override (GERCEK ARAC DEGIL, sadece simulasyon).
+# Yukleme sirasi: sub-6dof.parm -> sub-aura.parm -> BU DOSYA (--add-param-file, en son = kazanir)
+# Amac: kolay arm, yay-merkezli QGC joystick (MANUAL_CONTROL) ile temiz surus, stabil kalma.
+
+# ===== (1) ZORUNLU: arming + joystick kontrolu =====
+ARMING_CHECK     0        # gercek=448; RC-channels on-kosulu SITL'de joystick arm'i engeller
+RC_OPTIONS       0        # gercek=32 (strict-RC biti); duz RC-override yolu
+RC3_TRIM         1500     # gercek=1100 -> stick merkezde arac yukari cikar; 1500 = dikey notr (PWM1500=0N)
+
+# ===== Motor yonleri: sim BlueROV2-Heavy geometrisi -> ArduSub VARSAYILANI (+1) =====
+# (Gercek aracin MOT_x_DIRECTION kalibrasyonu sim geometrisine UYMAZ; "ileri" komutu yana surer.
+#  Ajan A matematikle ispatladi + odometri ile dogrulandi: +1 ile ileri = temiz +x.)
+MOT_1_DIRECTION  1
+MOT_2_DIRECTION  1
+MOT_3_DIRECTION  1
+MOT_4_DIRECTION  1
+MOT_5_DIRECTION  1
+MOT_6_DIRECTION  1
+MOT_7_DIRECTION  1
+MOT_8_DIRECTION  1
+
+# ===== (2) STABILITE / GERCEKCILIK =====
+BARO_PRIMARY     0        # gercek birincil baro #3 (harici); SITL sadece baro #0 simule eder
+# EKF (EK3) + DVL/ExternalNav kaynak TANIMLARI last.params'tan gelir, EZILMEZ:
+#   sub-aura.parm: AHRS_EKF_TYPE=3, EK3_SRC1_POSXY/VELXY=6 (ExternalNav/DVL), POSZ=1 (baro),
+#   YAW=1 (pusula), VISO_TYPE=1, VISO_POS/VEL/YAW_M_NSE gurultu ayarlari.
+# Burada SADECE SITL GPS'i kapatiyoruz -> EKF origin'i MANUEL set edilir (SET_GPS_GLOBAL_ORIGIN).
+# DVL verisi gz yer-gercekinden ArduSub'a ExternalNav (VISION_*) kopru node ile beslenir.
+GPS_TYPE         0
+# Pusula: gercek hard/soft-iron kalibrasyonunu sil (SITL SIM_MAG_OFS=0 -> dogru cal sifir)
+COMPASS_OFS_X    0
+COMPASS_OFS_Y    0
+COMPASS_OFS_Z    0
+COMPASS_OFS2_X   0
+COMPASS_OFS2_Y   0
+COMPASS_OFS2_Z   0
+COMPASS_DIA_X    1
+COMPASS_DIA_Y    1
+COMPASS_DIA_Z    1
+COMPASS_DIA2_X   1
+COMPASS_DIA2_Y   1
+COMPASS_DIA2_Z   1
+COMPASS_ODI_X    0
+COMPASS_ODI_Y    0
+COMPASS_ODI_Z    0
+COMPASS_ODI2_X   0
+COMPASS_ODI2_Y   0
+COMPASS_ODI2_Z   0
+COMPASS_DEV_ID   0
+COMPASS_DEV_ID2  0
+COMPASS_PRIO1_ID 0
+COMPASS_PRIO2_ID 0
+# Sürüş sırasında disarm yapabilecek failsafe'ler
+FS_PILOT_INPUT   0        # gercek=2 (manuel girdi >3s durunca disarm)
+FS_GCS_ENABLE    0        # gercek=2 (GCS heartbeat kaybinda disarm)
+FS_LEAK_ENABLE   0        # SITL'de kacak sensoru yok
+
+# ===== (3) OPSIYONEL: temizlik (EKF biaslari zaten ogrenir) =====
+INS_ACCOFFS_X    0
+INS_ACCOFFS_Y    0
+INS_ACCOFFS_Z    0
+INS_ACC2OFFS_X   0
+INS_ACC2OFFS_Y   0
+INS_ACC2OFFS_Z   0
+INS_ACC3OFFS_X   0
+INS_ACC3OFFS_Y   0
+INS_ACC3OFFS_Z   0
+AHRS_TRIM_X      0
+AHRS_TRIM_Y      0
+RNGFND1_TYPE     0
