@@ -27,6 +27,11 @@ BARO_PRIMARY     0        # gercek birincil baro #3 (harici); SITL sadece baro #
 # Burada SADECE SITL GPS'i kapatiyoruz -> EKF origin'i MANUEL set edilir (SET_GPS_GLOBAL_ORIGIN).
 # DVL verisi gz yer-gercekinden ArduSub'a ExternalNav (VISION_*) kopru node ile beslenir.
 GPS_TYPE         0
+# CAN'i SITL'de KAPAT (gercek=1, DroneCAN). CAN_P1_DRIVER=1 iken SITL arac durumunu
+# multicast UDP ile (239.255.145.51:20721) yayinlar; INTERNETSIZKEN multicast route'u
+# olmadigindan connect() 'Network is unreachable' -> ardusub exit(1) -> 5760 acilmaz
+# -> QGC baglanamaz. Bu akista CAN sim kullanilmaz (itki JSON/Gazebo FDM, DVL ExternalNav).
+CAN_P1_DRIVER    0
 # Pusula: gercek hard/soft-iron kalibrasyonunu sil (SITL SIM_MAG_OFS=0 -> dogru cal sifir)
 COMPASS_OFS_X    0
 COMPASS_OFS_Y    0
