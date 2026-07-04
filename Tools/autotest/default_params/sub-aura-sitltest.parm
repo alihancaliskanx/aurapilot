@@ -60,6 +60,28 @@ FS_PILOT_INPUT   0        # gercek=2 (manuel girdi >3s durunca disarm)
 FS_GCS_ENABLE    0        # gercek=2 (GCS heartbeat kaybinda disarm)
 FS_LEAK_ENABLE   0        # SITL'de kacak sensoru yok
 
+# ===== (2b) FAZ 2 — IMU GERCEKCILIK (gurultu / bias / drift / motor-titresim) =====
+# Golcuk gercekcilik calismasi. NOT: ArduSub SITL KENDI IMU'sunu uretir -> gurultu
+# gz <imu><noise> ile DEGIL, SITL SIM_* ile verilir. Parametre adlari/birimleri
+# aurapilot libraries/SITL/SITL.cpp'den DOGRULANDI (SIM_ACC_RND diye TEKIL param YOK;
+# IMU basina ACC1/ACC2/ACC3). Gercek arac DEGIL; amac EKF'i gercekci imperfect IMU
+# ile beslemek. Kademeli: gerekirse gate testinde artir/azalt.
+# -- Motor titresimi (itici -> IMU kuplaj); "motor noise factor", yalniz motor calisinca etkir --
+SIM_VIB_MOT_MAX  40       # Hz, itici titresim baz frekansi (T200 sinifi ~ onlarca Hz)
+SIM_ACC1_RND     0.20     # accel #1 motor titresim olcegi
+SIM_ACC2_RND     0.20
+SIM_ACC3_RND     0.20
+SIM_GYR1_RND     0.20     # gyro #1 motor titresim olcegi
+SIM_GYR2_RND     0.20
+SIM_GYR3_RND     0.20
+# -- Gyro yavas kaymasi (bias-instability / random-walk); SITL varsayilani 0.05/5 --
+SIM_DRIFT_SPEED  0.08     # deg/s/dk, gyro drift hizi (hafif gercekci artis)
+SIM_DRIFT_TIME   5        # dk, bir tam drift periyodu
+# -- Sabit accel bias (kalibrasyon artigi, ICM-20602/MPU6000 sinifi), m/s^2 --
+SIM_ACC1_BIAS_X  0.03
+SIM_ACC1_BIAS_Y  -0.02
+SIM_ACC1_BIAS_Z  0.03
+
 # ===== (3) OPSIYONEL: temizlik (EKF biaslari zaten ogrenir) =====
 INS_ACCOFFS_X    0
 INS_ACCOFFS_Y    0
