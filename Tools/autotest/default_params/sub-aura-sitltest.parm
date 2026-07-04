@@ -82,6 +82,13 @@ SIM_ACC1_BIAS_X  0.03
 SIM_ACC1_BIAS_Y  -0.02
 SIM_ACC1_BIAS_Z  0.03
 
+# ===== (2c) FAZ 3 — DVL olcum gurultusu kalibrasyonu =====
+# DVL koprusu (docker/dvl_bridge.py) hiza ~0.05 m/s beyaz gurultu + %1 scale + %3
+# dropout + nadir outlier enjekte eder. EKF'in bekledigi olcum gurultusu bununla
+# uyumlu olmali (innov ~chi2). Gercek arac VISO_VEL_M_NSE=0.1; SITL'de enjekte edilene
+# kalibre: 0.07 (~1.4x enjekte sigma). VISO_POS_M_NSE=0.2 zaten enjekte 0.02'nin uzerinde.
+VISO_VEL_M_NSE   0.07
+
 # ===== (3) OPSIYONEL: temizlik (EKF biaslari zaten ogrenir) =====
 INS_ACCOFFS_X    0
 INS_ACCOFFS_Y    0
