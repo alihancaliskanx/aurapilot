@@ -498,6 +498,10 @@ class VehicleInfo(object):
                 "waf_target": "bin/ardusub",
                 "default_params_filename": "default_params/sub-6dof.parm",
             },
+            "vectored_6dof-aura": {
+                "waf_target": "bin/ardusub",
+                "default_params_filename": ["default_params/sub-6dof.parm", "default_params/sub-aura.parm"],
+            },
             "gazebo-bluerov2": {
                 "waf_target": "bin/ardusub",
                 "default_params_filename": "default_params/sub.parm",
