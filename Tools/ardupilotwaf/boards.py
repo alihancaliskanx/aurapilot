@@ -415,6 +415,15 @@ class Board:
                 env.CXXFLAGS += [
                     '-Werror=sizeof-pointer-div',
                 ]
+            if self.cc_version_gte(cfg, 13, 0):
+                # GCC 13+ false positives in 4.5.3 (AC_PID ctor maybe-uninitialized,
+                # AP_ADSB_Sagetech snprintf truncation, AP_Param unused-but-set):
+                # demote from -Werror back to plain warnings
+                env.CXXFLAGS += [
+                    '-Wno-error=maybe-uninitialized',
+                    '-Wno-error=format-truncation',
+                    '-Wno-error=unused-but-set-variable',
+                ]
 
         if cfg.options.Werror:
             errors = ['-Werror',
@@ -686,16 +695,6 @@ class sitl(Board):
             '-Werror=float-equal',
             '-Werror=missing-declarations',
         ]
-
-        if 'clang' not in cfg.env.COMPILER_CC and self.cc_version_gte(cfg, 13, 0):
-            # GCC 13+ false positives in 4.5.3 (AC_PID ctor maybe-uninitialized,
-            # AP_ADSB_Sagetech snprintf truncation, AP_Param unused-but-set):
-            # demote from -Werror back to plain warnings for SITL builds
-            env.CXXFLAGS += [
-                '-Wno-error=maybe-uninitialized',
-                '-Wno-error=format-truncation',
-                '-Wno-error=unused-but-set-variable',
-            ]
 
         if not cfg.options.disable_networking and not 'clang' in cfg.env.COMPILER_CC:
             # lwip doesn't build with clang
@@ -1112,6 +1111,18 @@ class chibios(Board):
         env.CFLAGS += [
             '-std=c11'
         ]
+
+        if self.cc_version_gte(cfg, 13, 0):
+            # re-apply the base-class GCC 13+ -Wno-error demotions: the CFLAGS
+            # appended into CXXFLAGS above contain -Werror=format, which
+            # re-escalates the format-truncation sub-warning (last flag wins)
+            gcc13_no_error = [
+                '-Wno-error=maybe-uninitialized',
+                '-Wno-error=format-truncation',
+                '-Wno-error=unused-but-set-variable',
+            ]
+            env.CFLAGS += gcc13_no_error
+            env.CXXFLAGS += gcc13_no_error
 
         if Utils.unversioned_sys_platform() == 'cygwin':
             env.CXXFLAGS += ['-DCYGWIN_BUILD']
