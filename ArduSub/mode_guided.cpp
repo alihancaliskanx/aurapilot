@@ -810,6 +810,13 @@ float ModeGuided::get_auto_heading()
 
     case AUTO_YAW_CORRECT_XTRACK: {
         // TODO return current yaw if not in appropriate mode
+        // AURA: sifir/kisa yatay bacakta (yerinde dalis, satha cikis, foto penceresi)
+        // hat kerterizi tanimsizdir; get_bearing origin==dest icin 0 (kuzey) dondurur
+        // ve arac her dikey bacakta kuzeye donerdi. Mevcut yaw HEDEFINI koru.
+        const Vector2f track_ne_cm = sub.wp_nav.get_wp_destination_NEU_cm().xy() - sub.wp_nav.get_wp_origin_NEU_cm().xy();
+        if (track_ne_cm.length_squared() < sq(50.0f)) {   // < 0.5 m yatay hat
+            return attitude_control->get_att_target_euler_cd().z;
+        }
         // Bearing of current track (centidegrees)
         float track_bearing = get_bearing_cd(sub.wp_nav.get_wp_origin_NEU_cm().xy(), sub.wp_nav.get_wp_destination_NEU_cm().xy());
 
