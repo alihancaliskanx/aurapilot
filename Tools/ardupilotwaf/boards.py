@@ -687,6 +687,16 @@ class sitl(Board):
             '-Werror=missing-declarations',
         ]
 
+        if 'clang' not in cfg.env.COMPILER_CC and self.cc_version_gte(cfg, 13, 0):
+            # GCC 13+ false positives in 4.5.3 (AC_PID ctor maybe-uninitialized,
+            # AP_ADSB_Sagetech snprintf truncation, AP_Param unused-but-set):
+            # demote from -Werror back to plain warnings for SITL builds
+            env.CXXFLAGS += [
+                '-Wno-error=maybe-uninitialized',
+                '-Wno-error=format-truncation',
+                '-Wno-error=unused-but-set-variable',
+            ]
+
         if not cfg.options.disable_networking and not 'clang' in cfg.env.COMPILER_CC:
             # lwip doesn't build with clang
             env.CXXFLAGS += ['-DAP_NETWORKING_ENABLED=1']
