@@ -7,6 +7,22 @@
  *  While in the auto flight mode, navigation or do/now commands can be run.
  *  Code in this file implements the navigation commands
  */
+
+// AURA sig-su satih tavani (GOREV_ALGORITMASI.md §7): AUTO'da dikey hedef
+// satihtan en az 0.3 m derinlikte tutulur. Sig suda terrain hedefi
+// ("tabandan +1 m") su seviyesinin USTUNE dusebilir -> arac satihta durmadan
+// yukari iter (Bar30 da <0.2-0.3 m'de saglikli okumaz). 4.5.3'te terrain
+// ofseti wp_nav tarafindan pos_target'a dahil edildiginden clamp dogrudan
+// hedefe uygulanir; her dongude yeniden hesaplanir (rangefinder/terrain
+// degisimini izler). (master 6621332'nin 4.5.3 portu; desired/target ayrimi
+// 4.5'te yok, get/set_pos_target_z_cm kullanilir.)
+static void aura_satih_tavani_uygula(AC_PosControl *position_control)
+{
+    constexpr float SATIH_TAVANI_Z_CM = -30.0f;   // NEU z (yukari, cm; 0 = satih)
+    if (position_control->get_pos_target_z_cm() > SATIH_TAVANI_Z_CM) {
+        position_control->set_pos_target_z_cm(SATIH_TAVANI_Z_CM);
+    }
+}
 bool ModeAuto::init(bool ignore_checks) {
      if (!sub.position_ok() || !sub.mission.present()) {
         return false;
@@ -131,10 +147,10 @@ void ModeAuto::auto_wp_run()
     motors.set_desired_spool_state(AP_Motors::DesiredSpoolState::THROTTLE_UNLIMITED);
 
     // run waypoint controller
-    // TODO logic for terrain tracking target going below fence limit
     // TODO implement waypoint radius individually for each waypoint based on cmd.p2
     // TODO fix auto yaw heading to switch to something appropriate when mission complete and switches to loiter
     sub.failsafe_terrain_set_status(sub.wp_nav.update_wpnav());
+    aura_satih_tavani_uygula(position_control);   // sig-su: hedef satihtan >= 0.3 m derinde
 
     ///////////////////////
     // update xy outputs //
@@ -320,6 +336,7 @@ void ModeAuto::auto_loiter_run()
 
     // run waypoint and z-axis position controller
     sub.failsafe_terrain_set_status(sub.wp_nav.update_wpnav());
+    aura_satih_tavani_uygula(position_control);   // sig-su: hedef satihtan >= 0.3 m derinde
 
     ///////////////////////
     // update xy outputs //
