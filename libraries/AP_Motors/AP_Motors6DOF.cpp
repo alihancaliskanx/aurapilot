@@ -237,6 +237,43 @@ int16_t AP_Motors6DOF::calc_thrust_to_pwm(float thrust_in) const
     return 1500 + thrust_in * (thrust_in > 0 ? range_up : range_down);
 }
 
+// slew limit the change in a motor's thrust command (-1..1). For a
+// bidirectional thruster MOT_SLEW_UP_TIME is the minimum time to go from
+// stopped to full output in either direction and MOT_SLEW_DN_TIME the
+// minimum time to fall from full output back to stopped; a reversal sheds
+// magnitude at the down rate, crosses zero, then builds at the up rate.
+// Times are constrained to 0~0.5s, zero disables that limit. State is
+// reset in SHUT_DOWN/GROUND_IDLE so disarming stops motors immediately.
+float AP_Motors6DOF::thrust_slew_limit(int8_t motor, float thrust_in)
+{
+    const float target = constrain_float(thrust_in, -1.0f, 1.0f);
+    const float last = _thrust_slew_out[motor];
+
+    // largest allowed magnitude change this loop; zero means unlimited
+    const float up_step = is_positive(_slew_up_time) ? _dt / constrain_float(_slew_up_time, 0.0f, 0.5f) : 0.0f;
+    const float dn_step = is_positive(_slew_dn_time) ? _dt / constrain_float(_slew_dn_time, 0.0f, 0.5f) : 0.0f;
+
+    float out = target;
+    if (is_negative(last * target)) {
+        if (is_positive(dn_step) && dn_step < fabsf(last)) {
+            out = last - copysignf(dn_step, last);
+        } else if (is_positive(up_step)) {
+            // reached zero this loop; spend the remaining fraction ramping up
+            const float loop_frac = is_positive(dn_step) ? (1.0f - fabsf(last) / dn_step) : 1.0f;
+            out = copysignf(MIN(up_step * loop_frac, fabsf(target)), target);
+        }
+    } else if (fabsf(target) > fabsf(last)) {
+        if (is_positive(up_step)) {
+            out = last + constrain_float(target - last, -up_step, up_step);
+        }
+    } else if (is_positive(dn_step)) {
+        out = last + constrain_float(target - last, -dn_step, dn_step);
+    }
+
+    _thrust_slew_out[motor] = out;
+    return out;
+}
+
 void AP_Motors6DOF::output_to_motors()
 {
     int8_t i;
@@ -249,6 +286,7 @@ void AP_Motors6DOF::output_to_motors()
         for (i=0; i<AP_MOTORS_MAX_NUM_MOTORS; i++) {
             if (motor_enabled[i]) {
                 motor_out[i] = 1500;
+                _thrust_slew_out[i] = 0.0f;
             }
         }
         break;
@@ -257,6 +295,7 @@ void AP_Motors6DOF::output_to_motors()
         for (i=0; i<AP_MOTORS_MAX_NUM_MOTORS; i++) {
             if (motor_enabled[i]) {
                 motor_out[i] = 1500;
+                _thrust_slew_out[i] = 0.0f;
             }
         }
         break;
@@ -266,7 +305,7 @@ void AP_Motors6DOF::output_to_motors()
         // set motor output based on thrust requests
         for (i=0; i<AP_MOTORS_MAX_NUM_MOTORS; i++) {
             if (motor_enabled[i]) {
-                motor_out[i] = calc_thrust_to_pwm(_thrust_rpyt_out[i]);
+                motor_out[i] = calc_thrust_to_pwm(thrust_slew_limit(i, _thrust_rpyt_out[i]));
             }
         }
         break;
