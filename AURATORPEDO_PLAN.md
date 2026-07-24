@@ -66,8 +66,22 @@ Taban: **ArduSub kopyası** (derinlik/EKF/failsafe/joystick + aura yamaları haz
   çubuğu = dal/çık hızı. GAZEBO'DA DOĞRULANDI: 2.3-2.6 m/s seyirde −11 m dalış
   (pitch −29°), +26° ile çıkış, hedef derinlik tutma. Kazanç parametreleştirme kaldı.
   + MANUAL/STABILIZE lateral→pitch remap (QGC toggle'sız pitch; lateral çıkışı 0)
-- 🟡 3.3 Modlar: MANUAL ✓, STABILIZE ✓, ALT_HOLD ✓, **AUTO ✓ (2026-07-24)**;
-  SURFACE/GUIDED torpido uyarlaması bekliyor
+  + DALIŞ OTO-GAZI (2026-07-25): derinlik isteği/hatası varken ileri komut min 0.6 —
+  TEK ÇUBUKLA dal/tut/çık (iki çubuk koordinasyonu gerekmez; QGC sanal joystick'te
+  fareyle imkânsızdı) + hedef windup kıskacı (araç ±3 m bandı) + saplanma koruması
+  (istenen yönün tersine eğikken gaz kesilir — burun tabana saplanınca çıkış
+  kilitleniyordu). TEST: durgun araç yalnız throttle ile −8 dalış/−11.5 tutma/−1.7 çıkış ✓
+- 🟡 3.3 Modlar: MANUAL ✓, STABILIZE ✓, ALT_HOLD ✓, **AUTO ✓**, **GUIDED ✓ (2026-07-24)**;
+  SURFACE bekliyor
+- ✅ GUIDED torpido (mode_guided.cpp): pos = pure-pursuit (AUTO deseni); vel = hız
+  vektörü yönüne yaw + büyüklüğe forward (250 cm/s tam yol) + vz→derinlik;
+  posvel benzer; angle = pitch döngüsü komutun üstüne. Yaw üç alt-modda da
+  DETERMİNİSTİK (giriş auto_yaw modunda kilitlenip yanlış yöne gitme kusuru
+  teşhisle bulundu — artık pilot aktif çubuğu hariç hep hedefe/hız yönüne döner;
+  CONDITION_YAW kamera yönü guided'da feda edildi, foto akışı AUTO kullanıyor).
+  TEST: 60 m kuzey + 8 m derinlik hedefi → dönüş + 40 sn'de varış (wpdist 4 m) +
+  dalış; varış sonrası istasyon-tutma daireleri (torpido duramaz — doğal davranış).
+  Vel: 1.5 m/s komut → 1.84 seyir + durdurma ✓
 - ✅ 3.4 KISMEN — AUTO torpido "pure pursuit" (mode_auto.cpp): translate_wpnav_rp
   (hover-varsayımlı, dur-kalk kilitleniyordu) yerine: ileri = mesafe-orantılı
   (15 m'den iniş) × burun-hedef hizası (alt sınır 0.25 — DÖNÜŞ İÇİN YOL ŞART,

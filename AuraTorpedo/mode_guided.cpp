@@ -485,32 +485,29 @@ void ModeGuided::guided_pos_control_run()
     // run waypoint controller
     torpedo.failsafe_terrain_set_status(torpedo.wp_nav.update_wpnav());
 
-    float lateral_out, forward_out;
-    torpedo.translate_wpnav_rp(lateral_out, forward_out);
+    // AURA torpido pure-pursuit (AUTO ile ayni desen, bkz. mode_auto.cpp):
+    // ileri = mesafe-orantili x burun-hedef hizasi (alt sinir 0.25 — donus icin yol sart);
+    // derinlik = pitch dongusu (update_z_controller throttle yolu olu, cagrilmaz)
+    const float trpd_dist_cm = torpedo.wp_nav.get_wp_distance_to_destination();
+    const float trpd_wp_bearing_cd = torpedo.wp_nav.get_wp_bearing_to_destination();
+    const float trpd_yaw_err_rad = radians(wrap_180_cd(trpd_wp_bearing_cd - ahrs.yaw_sensor) * 0.01f);
+    float trpd_fwd = constrain_float(trpd_dist_cm / 1500.0f, 0.0f, 1.0f) * MAX(0.25f, cosf(trpd_yaw_err_rad));
+    if (trpd_dist_cm > 1000.0f) {
+        trpd_fwd = MAX(trpd_fwd, 0.35f);
+    }
+    motors.set_lateral(0.0f);
+    motors.set_forward(trpd_fwd);
 
-    // Send to forward/lateral outputs
-    motors.set_lateral(lateral_out);
-    motors.set_forward(forward_out);
+    const float trpd_pitch = constrain_float(channel_pitch->get_control_in() + trpd_derinlik_pitch_cd(), -4000.0f, 4000.0f);
 
-    // WP_Nav has set the vertical position control targets
-    // run the vertical position controller and set output throttle
-    position_control->update_z_controller();
-
-    // call attitude controller
-    if (torpedo.auto_yaw_mode == AUTO_YAW_HOLD) {
-        // roll & pitch & yaw rate from pilot
-        attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw(channel_roll->get_control_in(), channel_pitch->get_control_in(), target_yaw_rate);
-    } else if (torpedo.auto_yaw_mode == AUTO_YAW_LOOK_AT_HEADING) {
-        // roll, pitch from pilot, yaw & yaw_rate from auto_control
-        target_yaw_rate = torpedo.yaw_look_at_heading_slew * 100.0;
-        attitude_control->input_euler_angle_roll_pitch_slew_yaw(channel_roll->get_control_in(), channel_pitch->get_control_in(), get_auto_heading(), target_yaw_rate);
-    } else if (torpedo.auto_yaw_mode == AUTO_YAW_RATE) {
-        // roll, pitch from pilot, yaw_rate from auto_control
-        target_yaw_rate = torpedo.yaw_look_at_heading_slew * 100.0;
-        attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw(channel_roll->get_control_in(), channel_pitch->get_control_in(), target_yaw_rate);
+    // AURA torpido: pos-guided yaw DETERMINISTIK pure-pursuit — hangi auto_yaw
+    // modunda olursa olsun hedefe doner (giris modunda kilitlenip yanlis yone
+    // gitme kusuru; teshis 2026-07-24). Tek istisna: pilotun AKTIF yaw cubugu.
+    if (torpedo.auto_yaw_mode == AUTO_YAW_HOLD && !is_zero(target_yaw_rate)) {
+        attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw(channel_roll->get_control_in(), trpd_pitch, target_yaw_rate);
     } else {
-        // roll, pitch from pilot, yaw heading from auto_heading()
-        attitude_control->input_euler_angle_roll_pitch_yaw(channel_roll->get_control_in(), channel_pitch->get_control_in(), get_auto_heading(), true);
+        const float trpd_yaw_cd = (trpd_dist_cm > 300.0f) ? trpd_wp_bearing_cd : get_auto_heading();
+        attitude_control->input_euler_angle_roll_pitch_yaw(channel_roll->get_control_in(), trpd_pitch, trpd_yaw_cd, true);
     }
 }
 
@@ -555,35 +552,30 @@ void ModeGuided::guided_vel_control_run()
         position_control->set_vel_desired_cms(Vector3f(0,0,0));
     }
 
-    position_control->stop_pos_xy_stabilisation();
-    // call velocity controller which includes z axis controller
-    position_control->update_xy_controller();
-
+    // AURA torpido: hiz hedefi -> yon (bearing) + buyukluk (forward); z -> derinlik
+    // hedefi entegrasyonu + pitch dongusu (update_xy/z controller yollari olu)
     position_control->set_pos_target_z_from_climb_rate_cm(position_control->get_vel_desired_cms().z);
-    position_control->update_z_controller();
+    const Vector2f trpd_vxy = position_control->get_vel_desired_cms().xy();
+    const float trpd_vlen_cms = trpd_vxy.length();
+    float trpd_fwd = 0.0f;
+    float trpd_vel_bearing_cd = (float)ahrs.yaw_sensor;
+    if (trpd_vlen_cms > 20.0f) {                 // >0.2 m/s: yon anlamli
+        trpd_vel_bearing_cd = degrees(atan2f(trpd_vxy.y, trpd_vxy.x)) * 100.0f;   // NEU: atan2(Dogu, Kuzey)
+        const float trpd_err_rad = radians(wrap_180_cd(trpd_vel_bearing_cd - ahrs.yaw_sensor) * 0.01f);
+        trpd_fwd = constrain_float(trpd_vlen_cms / 250.0f, 0.0f, 1.0f) * MAX(0.25f, cosf(trpd_err_rad));
+    }
+    motors.set_lateral(0.0f);
+    motors.set_forward(trpd_fwd);
 
-    float lateral_out, forward_out;
-    torpedo.translate_pos_control_rp(lateral_out, forward_out);
+    const float trpd_pitch = constrain_float(channel_pitch->get_control_in() + trpd_derinlik_pitch_cd(), -4000.0f, 4000.0f);
 
-    // Send to forward/lateral outputs
-    motors.set_lateral(lateral_out);
-    motors.set_forward(forward_out);
-
-    // call attitude controller
-    if (torpedo.auto_yaw_mode == AUTO_YAW_HOLD) {
-        // roll & pitch & yaw rate from pilot
-        attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw(channel_roll->get_control_in(), channel_pitch->get_control_in(), target_yaw_rate);
-    } else if (torpedo.auto_yaw_mode == AUTO_YAW_LOOK_AT_HEADING) {
-        // roll, pitch from pilot, yaw & yaw_rate from auto_control
-        target_yaw_rate = torpedo.yaw_look_at_heading_slew * 100.0;
-        attitude_control->input_euler_angle_roll_pitch_slew_yaw(channel_roll->get_control_in(), channel_pitch->get_control_in(), get_auto_heading(), target_yaw_rate);
-    } else if (torpedo.auto_yaw_mode == AUTO_YAW_RATE) {
-        // roll, pitch from pilot, yaw_rate from auto_control
-        target_yaw_rate = torpedo.yaw_look_at_heading_slew * 100.0;
-        attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw(channel_roll->get_control_in(), channel_pitch->get_control_in(), target_yaw_rate);
+    // AURA torpido: vel-guided yaw DETERMINISTIK — hiz vektoru yonune doner;
+    // tek istisna pilotun aktif yaw cubugu
+    if (torpedo.auto_yaw_mode == AUTO_YAW_HOLD && !is_zero(target_yaw_rate)) {
+        attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw(channel_roll->get_control_in(), trpd_pitch, target_yaw_rate);
     } else {
-        // roll, pitch from pilot, yaw heading from auto_heading()
-        attitude_control->input_euler_angle_roll_pitch_yaw(channel_roll->get_control_in(), channel_pitch->get_control_in(), get_auto_heading(), true);
+        const float trpd_yaw_cd = (trpd_vlen_cms > 20.0f) ? trpd_vel_bearing_cd : get_auto_heading();
+        attitude_control->input_euler_angle_roll_pitch_yaw(channel_roll->get_control_in(), trpd_pitch, trpd_yaw_cd, true);
     }
 }
 
@@ -638,32 +630,30 @@ void ModeGuided::guided_posvel_control_run()
     position_control->input_pos_vel_accel_z(pz, posvel_vel_target_cms.z, 0);
     posvel_pos_target_cm.z = pz;
 
-    // run position controller
-    position_control->update_xy_controller();
-    position_control->update_z_controller();
+    // AURA torpido: pos hedefe pure-pursuit (update_xy/z controller yollari olu)
+    const Vector2f trpd_fark = posvel_pos_target_cm.xy().tofloat() - inertial_nav.get_position_xy_cm();
+    const float trpd_dist_cm = trpd_fark.length();
+    float trpd_fwd = 0.0f;
+    float trpd_bearing_cd = (float)ahrs.yaw_sensor;
+    if (trpd_dist_cm > 50.0f) {
+        trpd_bearing_cd = degrees(atan2f(trpd_fark.y, trpd_fark.x)) * 100.0f;    // NEU: atan2(Dogu, Kuzey)
+        const float trpd_err_rad = radians(wrap_180_cd(trpd_bearing_cd - ahrs.yaw_sensor) * 0.01f);
+        trpd_fwd = constrain_float(trpd_dist_cm / 1500.0f, 0.0f, 1.0f) * MAX(0.25f, cosf(trpd_err_rad));
+        if (trpd_dist_cm > 1000.0f) {
+            trpd_fwd = MAX(trpd_fwd, 0.35f);
+        }
+    }
+    motors.set_lateral(0.0f);
+    motors.set_forward(trpd_fwd);
 
-    float lateral_out, forward_out;
-    torpedo.translate_pos_control_rp(lateral_out, forward_out);
+    const float trpd_pitch = constrain_float(channel_pitch->get_control_in() + trpd_derinlik_pitch_cd(), -4000.0f, 4000.0f);
 
-    // Send to forward/lateral outputs
-    motors.set_lateral(lateral_out);
-    motors.set_forward(forward_out);
-
-    // call attitude controller
-    if (torpedo.auto_yaw_mode == AUTO_YAW_HOLD) {
-        // roll & pitch & yaw rate from pilot
-        attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw(channel_roll->get_control_in(), channel_pitch->get_control_in(), target_yaw_rate);
-    } else if (torpedo.auto_yaw_mode == AUTO_YAW_LOOK_AT_HEADING) {
-        // roll, pitch from pilot, yaw & yaw_rate from auto_control
-        target_yaw_rate = torpedo.yaw_look_at_heading_slew * 100.0;
-        attitude_control->input_euler_angle_roll_pitch_slew_yaw(channel_roll->get_control_in(), channel_pitch->get_control_in(), get_auto_heading(), target_yaw_rate);
-    } else if (torpedo.auto_yaw_mode == AUTO_YAW_RATE) {
-        // roll, pitch from pilot, and yaw_rate from auto_control
-        target_yaw_rate = torpedo.yaw_look_at_heading_slew * 100.0;
-        attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw(channel_roll->get_control_in(), channel_pitch->get_control_in(), target_yaw_rate);
+    // AURA torpido: posvel yaw DETERMINISTIK — hedefe doner; istisna pilot cubugu
+    if (torpedo.auto_yaw_mode == AUTO_YAW_HOLD && !is_zero(target_yaw_rate)) {
+        attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw(channel_roll->get_control_in(), trpd_pitch, target_yaw_rate);
     } else {
-        // roll, pitch from pilot, yaw heading from auto_heading()
-        attitude_control->input_euler_angle_roll_pitch_yaw(channel_roll->get_control_in(), channel_pitch->get_control_in(), get_auto_heading(), true);
+        const float trpd_yaw_cd = (trpd_dist_cm > 300.0f) ? trpd_bearing_cd : get_auto_heading();
+        attitude_control->input_euler_angle_roll_pitch_yaw(channel_roll->get_control_in(), trpd_pitch, trpd_yaw_cd, true);
     }
 }
 
@@ -710,12 +700,13 @@ void ModeGuided::guided_angle_control_run()
     // set motors to full range
     motors.set_desired_spool_state(AP_Motors::DesiredSpoolState::THROTTLE_UNLIMITED);
 
-    // call attitude controller
-    attitude_control->input_euler_angle_roll_pitch_yaw(roll_in, pitch_in, yaw_in, true);
-
-    // call position controller
+    // AURA torpido: throttle yolu olu; derinlik hedefi climb_rate'ten entegre edilir,
+    // pitch dongusu komut edilen pitch'in USTUNE eklenir (update_z_controller yok)
     position_control->set_pos_target_z_from_climb_rate_cm(climb_rate_cms);
-    position_control->update_z_controller();
+    const float trpd_pitch = constrain_float(pitch_in + trpd_derinlik_pitch_cd(), -4000.0f, 4000.0f);
+
+    // call attitude controller
+    attitude_control->input_euler_angle_roll_pitch_yaw(roll_in, trpd_pitch, yaw_in, true);
 }
 
 // Guided Limit code

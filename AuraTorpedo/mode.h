@@ -278,6 +278,10 @@ protected:
     // AURA torpido: derinlik->pitch dis dongusunun hesapladigi pitch hedefi (cd).
     // control_depth() doldurur, run_pre() attitude hedefine ekler (Faz 3.2).
     float _trpd_pitch_cd = 0.0f;
+    // AURA torpido "dalis oto-gazi": derinlik istegi/hatasi varken pilot ileri
+    // vermese bile arac kendine yol verir (fin otoritesi yol ister; tek cubukla
+    // dalis mumkun olsun). control_depth() doldurur, run_post() kullanir.
+    bool _trpd_gaz_gerek = false;
 
     const char *name() const override { return "ALT_HOLD"; }
     const char *name4() const override { return "ALTH"; }

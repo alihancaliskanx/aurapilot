@@ -108,7 +108,14 @@ void ModeAlthold::run_pre()
 
 void ModeAlthold::run_post()
 {
-    motors.set_forward(channel_forward->norm_input());
+    float trpd_ileri = channel_forward->norm_input();
+    // AURA torpido "dalis oto-gazi": pilot derinlik istiyor (throttle cubugu) ya da
+    // derinlik hatasi buyukse, ileri komutu en az 0.6'ya cek — dalmak icin yol sart,
+    // pilotun iki cubugu ayni anda tutmasi gerekmesin (QGC sanal joystick'te imkansiz).
+    if (_trpd_gaz_gerek) {
+        trpd_ileri = MAX(trpd_ileri, 0.6f);
+    }
+    motors.set_forward(trpd_ileri);
     // AURA torpido: lateral yok (holonomik degil); cikis 0
     motors.set_lateral(0.0f);
 }
@@ -132,8 +139,28 @@ void ModeAlthold::control_depth() {
     // === AURA torpido (Faz 3.2): derinlik hatasi -> pitch hedefi ===
     // update_z_controller CAGRILMAZ: throttle cikisi torpidoda hicbir motora
     // baglanmiyor (frame'de throttle faktorleri 0) ve integrator birikmesin.
-    // Aura satih tavani: hedef derinlik satihtan en az 0.3 m altta kalir.
+    const float z_cm = inertial_nav.get_position_z_up_cm();
+
+    // Windup kiskaci: hedef derinlik aracin ±3 m bandinda kalir — cubuk basili
+    // tutulunca hedef sinirsiz birikmesin (tabana/satiha "gorunmez hedef" kacmasi).
+    position_control->set_pos_target_z_cm(constrain_float(position_control->get_pos_target_z_cm(), z_cm - 300.0f, z_cm + 300.0f));
+    // Aura satih tavani EN SON: hedef satihtan en az 0.3 m derinde.
     position_control->set_pos_target_z_cm(MIN(position_control->get_pos_target_z_cm(), TRPD_SATIH_TAVANI_CM));
 
     _trpd_pitch_cd = trpd_derinlik_pitch_cd();
+
+    // Dalis oto-gazi tetigi: pilot aktif derinlik istiyor YA DA >0.5 m hata var
+    // (HAM hata — _trpd_pitch_cd hiz-olcekli, duran aracta hep 0 olurdu).
+    const float trpd_ham_hata_m = (position_control->get_pos_target_z_cm() - z_cm) * 0.01f;
+    bool gaz = (fabsf(target_climb_rate_cm_s) > 0.05f) || (fabsf(trpd_ham_hata_m) > 0.5f);
+    // Saplanma korumasi: arac istenen yonun TERSINE egikse gaz verme — burun
+    // tabana/satha sapliyken one itmek bastirir (gozlenen kilitlenme); gazi kes,
+    // pozitif sephiye + dogrultma momenti burnu kurtarsin, sonra gaz geri gelir.
+    if (trpd_ham_hata_m > 0.5f && ahrs.pitch_sensor < -1000) {      // cikilacak ama burun asagi
+        gaz = false;
+    }
+    if (trpd_ham_hata_m < -0.5f && ahrs.pitch_sensor > 1000) {      // dalinacak ama burun yukari
+        gaz = false;
+    }
+    _trpd_gaz_gerek = gaz;
 }
