@@ -91,7 +91,7 @@ void DroneCANDevice::update_baro() {
         sim_alt = _buffer[best_index].data;
     }
 
-#if !APM_BUILD_TYPE(APM_BUILD_ArduSub)
+#if !APM_BUILD_SUB_OR_TORPEDO
     float sigma, delta, theta;
 
     AP_Baro::SimpleAtmosphere(sim_alt * 0.001f, sigma, delta, theta);

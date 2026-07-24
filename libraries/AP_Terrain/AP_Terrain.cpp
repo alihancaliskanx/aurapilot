@@ -32,7 +32,7 @@ extern const AP_HAL::HAL& hal;
 
 AP_Terrain *AP_Terrain::singleton;
 
-#if APM_BUILD_TYPE(APM_BUILD_ArduSub)
+#if APM_BUILD_SUB_OR_TORPEDO
 #define TERRAIN_ENABLE_DEFAULT 0
 #else
 #define TERRAIN_ENABLE_DEFAULT 1

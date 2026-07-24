@@ -1,0 +1,27 @@
+# AuraTorpedo (X-kuyruk torpido) SITL parametreleri — sub.parm USTUNE yuklenir.
+# Frame: SUB_FRAME_TORPEDO_XTAIL (8): M1 pervane, M2-5 fin (Gazebo aura_torpedo fin0..3)
+FRAME_CONFIG 8
+# Cikis haritasi: SERVO1..5 = Motor1..5; kalanlar bos (torpidoda 5 cikis var)
+SERVO1_FUNCTION 33
+SERVO2_FUNCTION 34
+SERVO3_FUNCTION 35
+SERVO4_FUNCTION 36
+SERVO5_FUNCTION 37
+SERVO6_FUNCTION 0
+SERVO7_FUNCTION 0
+SERVO8_FUNCTION 0
+# Offline/sim rahatligi (kullan.sh akisiyla uyumlu)
+CAN_P1_DRIVER 0
+FS_GCS_ENABLE 0
+# Ilk yuzme testleri: kontrol kazanclarini yumusak baslat (fin otoritesi hiza bagli;
+# Faz 3'te hiz-olcekli kazanc gelene kadar dusuk tutuluyor)
+ATC_ANG_RLL_P 3.0
+ATC_ANG_PIT_P 3.0
+ATC_ANG_YAW_P 3.0
+ATC_RAT_RLL_P 0.10
+ATC_RAT_PIT_P 0.10
+ATC_RAT_YAW_P 0.10
+# Torpido AUTO: burun hat kerterizine doner (lateral yok; aura sifir-bacak yaw yamasi fork'ta)
+WP_YAW_BEHAVIOR 4
+# Torpido WP kabul yarıçapı: 2.5 m/s seyirde gercekci varis (asiri kucuk yaricap tur attirir)
+WPNAV_RADIUS 500

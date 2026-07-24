@@ -75,7 +75,7 @@
 #endif
 
 #ifndef AP_FIELD_ELEVATION_ENABLED
-#define AP_FIELD_ELEVATION_ENABLED !defined(HAL_BUILD_AP_PERIPH) && !APM_BUILD_TYPE(APM_BUILD_ArduSub)
+#define AP_FIELD_ELEVATION_ENABLED !defined(HAL_BUILD_AP_PERIPH) && !APM_BUILD_SUB_OR_TORPEDO
 #endif
 
 extern const AP_HAL::HAL& hal;
@@ -746,7 +746,7 @@ void AP_Baro::init(void)
 
     // can optionally have baro on I2C too
     if (_ext_bus >= 0) {
-#if APM_BUILD_TYPE(APM_BUILD_ArduSub)
+#if APM_BUILD_SUB_OR_TORPEDO
 #if AP_BARO_MS56XX_ENABLED
         ADD_BACKEND(AP_Baro_MS56XX::probe(*this,
                                           std::move(GET_I2C_DEVICE(_ext_bus, HAL_BARO_MS5837_I2C_ADDR)), AP_Baro_MS56XX::BARO_MS5837));
@@ -857,14 +857,14 @@ void AP_Baro::_probe_i2c_barometers(void)
         { PROBE_LPS25H, AP_Baro_LPS2XH::probe, HAL_BARO_LPS25H_I2C_ADDR },
 #endif
 
-#if APM_BUILD_TYPE(APM_BUILD_ArduSub)
+#if APM_BUILD_SUB_OR_TORPEDO
 #if AP_BARO_KELLERLD_ENABLED
         { PROBE_KELLER, AP_Baro_KellerLD::probe, HAL_BARO_KELLERLD_I2C_ADDR },
 #endif
 #if AP_BARO_MS56XX_ENABLED
         { PROBE_MS5837, AP_Baro_MS56XX::probe_5837, HAL_BARO_MS5837_I2C_ADDR },
 #endif
-#endif  // APM_BUILD_TYPE(APM_BUILD_ArduSub)
+#endif  // APM_BUILD_SUB_OR_TORPEDO
     };
 
     for (const auto &spec : baroprobespec) {

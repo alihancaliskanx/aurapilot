@@ -426,7 +426,7 @@ void AP_Airspeed::allocate()
             break;
         case TYPE_NMEA_WATER:
 #if AP_AIRSPEED_NMEA_ENABLED
-#if APM_BUILD_TYPE(APM_BUILD_Rover) || APM_BUILD_TYPE(APM_BUILD_ArduSub) 
+#if APM_BUILD_TYPE(APM_BUILD_Rover) || APM_BUILD_SUB_OR_TORPEDO 
             sensor[i] = new AP_Airspeed_NMEA(*this, i);
 #endif
 #endif

@@ -175,6 +175,25 @@ void AP_Motors6DOF::setup_motors(motor_frame_class frame_class, motor_frame_type
         add_motor_raw_6dof(AP_MOTORS_MOT_6,     -1.0f,          0,              0,              -1.0f,              0,                  0,              6);
         break;
 
+    case SUB_FRAME_TORPEDO_XTAIL:
+        // AURA AuraTorpedo: tek pervane (M1, forward) + X-kuyruk 4 fin (M2-M5).
+        // Fin sirasi kictan bakis: M2 sancak-ust, M3 sancak-alt, M4 iskele-alt,
+        // M5 iskele-ust (Gazebo aura_torpedo modeli fin0..fin3 ile ayni sira).
+        // Isaretler ArduPilot FRD konvansiyonuna gore (+roll=sancak yatis,
+        // +pitch=burun YUKARI, +yaw=sancak donus). Gazebo LiftDrag olcumu:
+        // +fin sapmasi (+,+,-,-) BURUN ASAGI ve (+,+,+,+) ISKELE yatis uretti
+        // -> pitch ve roll sutunlari ters cevrildi; yaw dogrudan.
+        // (Nihai teyit: Gazebo kapali-cevrim STABILIZE testi; sapan eksenin sutunu cevrilir.)
+        // Finler aci-cikisli "motor" gibi: 1500 notr, rpy toplami sapmayi verir.
+        // Dikey itici YOK -> throttle hicbir cikisa gitmez (derinlik Faz 3'te pitch ile).
+        _frame_class_string = "TORPEDO_XTAIL";
+        add_motor_raw_6dof(AP_MOTORS_MOT_1,     0,              0,              0,              0,                  1.0f,               0,              1);
+        add_motor_raw_6dof(AP_MOTORS_MOT_2,     -1.0f,          -1.0f,          1.0f,           0,                  0,                  0,              2);
+        add_motor_raw_6dof(AP_MOTORS_MOT_3,     -1.0f,          -1.0f,          -1.0f,          0,                  0,                  0,              3);
+        add_motor_raw_6dof(AP_MOTORS_MOT_4,     -1.0f,          1.0f,           -1.0f,          0,                  0,                  0,              4);
+        add_motor_raw_6dof(AP_MOTORS_MOT_5,     -1.0f,          1.0f,           1.0f,           0,                  0,                  0,              5);
+        break;
+
     case SUB_FRAME_CUSTOM:
         // Put your custom motor setup here
         //break;

@@ -379,7 +379,7 @@ void NavEKF3_core::detectFlight()
         }
 
         if (!onGround) {
-#if APM_BUILD_TYPE(APM_BUILD_ArduSub)
+#if APM_BUILD_SUB_OR_TORPEDO
             // If depth has increased since arming, then we definitely are diving
             if ((stateStruct.position.z - posDownAtTakeoff) > 1.5f) {
                 inFlight = true;

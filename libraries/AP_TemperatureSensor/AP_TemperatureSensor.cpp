@@ -19,7 +19,7 @@
 
 #include <AP_Vehicle/AP_Vehicle_Type.h>
 
-#define AP_TEMPERATURE_SENSOR_DUMMY_METHODS_ENABLED (!(APM_BUILD_TYPE(APM_BUILD_ArduSub) || (AP_TEMPERATURE_SENSOR_ENABLED == 1)))
+#define AP_TEMPERATURE_SENSOR_DUMMY_METHODS_ENABLED (!(APM_BUILD_SUB_OR_TORPEDO || (AP_TEMPERATURE_SENSOR_ENABLED == 1)))
 
 
 #if !AP_TEMPERATURE_SENSOR_DUMMY_METHODS_ENABLED
@@ -161,7 +161,7 @@ void AP_TemperatureSensor::init()
     }
 
  // For Sub set the Default: Type to TSYS01 and I2C_ADDR of 0x77
-#if APM_BUILD_TYPE(APM_BUILD_ArduSub) && AP_TEMPERATURE_SENSOR_TSYS01_ENABLED
+#if APM_BUILD_SUB_OR_TORPEDO && AP_TEMPERATURE_SENSOR_TSYS01_ENABLED
     AP_Param::set_default_by_name("TEMP1_TYPE", (float)AP_TemperatureSensor_Params::Type::TSYS01);
     AP_Param::set_default_by_name("TEMP1_ADDR", TSYS01_ADDR_CSB0);
 #endif

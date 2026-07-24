@@ -32,6 +32,7 @@
 #define APM_BUILD_AP_Bootloader  11
 #define APM_BUILD_Blimp      12
 #define APM_BUILD_Heli       13
+#define APM_BUILD_AuraTorpedo 14   // AURA torpido UUV (ArduSub tabanli yeni arac sinifi)
 
 #ifdef APM_BUILD_DIRECTORY
 /*
@@ -45,7 +46,12 @@
 */
 #define APM_BUILD_COPTER_OR_HELI (APM_BUILD_TYPE(APM_BUILD_ArduCopter) || APM_BUILD_TYPE(APM_BUILD_Heli))
 
+// AURA: torpido sinifi (AuraTorpedo) su alti davranislarinda ArduSub ile ortak;
+// kutuphanelerdeki ArduSub kosullari bu makroyla genisletildi (Sub icin birebir ayni).
+#define APM_BUILD_SUB_OR_TORPEDO (APM_BUILD_TYPE(APM_BUILD_ArduSub) || APM_BUILD_TYPE(APM_BUILD_AuraTorpedo))
+
 #else 
 #define APM_BUILD_TYPE(type) @Invalid_use_of_APM_BUILD_TYPE
 #define APM_BUILD_COPTER_OR_HELI @Invalid_use_of_APM_BUILD_COPTER_OR_HELI
+#define APM_BUILD_SUB_OR_TORPEDO @Invalid_use_of_APM_BUILD_SUB_OR_TORPEDO
 #endif

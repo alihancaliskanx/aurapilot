@@ -28,7 +28,7 @@ extern const AP_HAL::HAL& hal;
  # define POSCONTROL_VEL_XY_IMAX                1000.0f // horizontal velocity controller IMAX gain default
  # define POSCONTROL_VEL_XY_FILT_HZ             5.0f    // horizontal velocity controller input filter
  # define POSCONTROL_VEL_XY_FILT_D_HZ           5.0f    // horizontal velocity controller input filter for D
-#elif APM_BUILD_TYPE(APM_BUILD_ArduSub)
+#elif APM_BUILD_SUB_OR_TORPEDO
  // default gains for Sub
  # define POSCONTROL_POS_Z_P                    3.0f    // vertical position controller P gain default
  # define POSCONTROL_VEL_Z_P                    8.0f    // vertical velocity controller P gain default

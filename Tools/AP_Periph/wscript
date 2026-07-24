@@ -4,18 +4,6 @@
 import fnmatch
 import sys
 
-try:
-    import em
-except ImportError:
-    print("you need to install empy with 'python -m pip install empy==3.3.4'")
-    sys.exit(1)
-
-try:
-    import pexpect
-except ImportError:
-    print("you need to install pexpect with 'python -m pip install pexpect'")
-    sys.exit(1)
-    
 
 def build(bld):
     targets = bld.ap_periph_boards()
@@ -25,6 +13,21 @@ def build(bld):
             valid_target = True
     if not valid_target:
         return
+
+    # AURA: em/pexpect yalniz periph kartlari gercekten derlenirken gerekli;
+    # modul-yukleme aninda import edilirse sitl gibi periph'siz build'ler
+    # bu paketler kurulu olmayan ortamlarda bosuna patliyor.
+    try:
+        import em  # noqa: F401
+    except ImportError:
+        print("you need to install empy with 'python -m pip install empy==3.3.4'")
+        sys.exit(1)
+
+    try:
+        import pexpect  # noqa: F401
+    except ImportError:
+        print("you need to install pexpect with 'python -m pip install pexpect'")
+        sys.exit(1)
 
     if bld.env.AP_PERIPH_HEAVY:
         libraries = bld.ap_get_all_libraries()

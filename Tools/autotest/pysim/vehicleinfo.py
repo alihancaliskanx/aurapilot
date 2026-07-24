@@ -420,6 +420,26 @@ class VehicleInfo(object):
             },
         },
     },
+    "AuraTorpedo": {
+        "default_frame": "vectored",
+        "frames": {
+            # Faz 1: Sub klonu davranis (SIM_Submarine ile standalone kosabilir)
+            "vectored": {
+                "waf_target": "bin/auratorpedo",
+                "default_params_filename": "default_params/sub.parm",
+            },
+            "vectored_6dof": {
+                "waf_target": "bin/auratorpedo",
+                "default_params_filename": "default_params/sub-6dof.parm",
+            },
+            # Gazebo (JSON backend) + X-kuyruk: aura_torpedo_sitl modeliyle
+            "torpedo-aura": {
+                "waf_target": "bin/auratorpedo",
+                "model": "JSON",
+                "default_params_filename": ["default_params/sub.parm", "default_params/torpedo-aura.parm"],
+            },
+        },
+    },
     "AntennaTracker": {
         "default_frame": "tracker",
         "frames": {
