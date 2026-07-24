@@ -25,3 +25,11 @@ ATC_RAT_YAW_P 0.10
 WP_YAW_BEHAVIOR 4
 # Torpido WP kabul yarıçapı: 2.5 m/s seyirde gercekci varis (asiri kucuk yaricap tur attirir)
 WPNAV_RADIUS 500
+# Torpido donus gercekciligi (2026-07-25): gercek torpido, boyunun 5-10 kati
+# yaricapla doner (~2.5 m/s'de 10-15 m -> ~10-14 der/s). Onceden tam cubuk ~34
+# der/s aninda donuyordu ("oyun gibi" hissi). Yaw her modda tavanli + yumusak.
+ACRO_YAW_P 1.2
+ATC_RATE_Y_MAX 12
+ATC_SLEW_YAW 1200
+ATC_RATE_P_MAX 45
+ATC_RATE_R_MAX 45

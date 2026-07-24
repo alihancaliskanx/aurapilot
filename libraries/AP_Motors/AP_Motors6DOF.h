@@ -30,6 +30,12 @@ public:
         SUB_FRAME_TORPEDO_XTAIL     // AURA: tek pervane + X-kuyruk 4 fin (AuraTorpedo; enum SONU=8, mevcut degerler kaymaz)
     } sub_frame_t;
 
+    // AURA torpido: hiz-olcekli fin kazanci. Fin momenti ~ hiz^2 oldugundan arac
+    // kodu her dongude 1/v^2 tabanli olcegi verir (Plane airspeed scaling'in su
+    // alti karsiligi). YALNIZ SUB_FRAME_TORPEDO_XTAIL'de uygulanir; Sub'da
+    // kimse cagirmadigi icin 1.0 kalir ve davranis degismez.
+    void set_torpedo_kazanc_olcek(float olcek) { _trpd_kazanc_olcek = olcek; }
+
     // Override parent
     void setup_motors(motor_frame_class frame_class, motor_frame_type frame_type) override;
 
@@ -70,6 +76,7 @@ protected:
 
     float               _forward_factor[AP_MOTORS_MAX_NUM_MOTORS]; // each motors contribution to forward/backward
     float               _lateral_factor[AP_MOTORS_MAX_NUM_MOTORS];  // each motors contribution to lateral (left/right)
+    float               _trpd_kazanc_olcek = 1.0f;  // AURA torpido: fin sapma olcegi (yalniz TORPEDO_XTAIL; bkz. set_torpedo_kazanc_olcek)
 
     // current limiting
     float _output_limited = 1.0f;

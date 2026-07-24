@@ -17,6 +17,25 @@ void Torpedo::motors_output()
     if (ap.motor_test) {
         verify_motor_test();
     } else {
+        // AURA torpido (Faz 3.1): hiz-olcekli fin kazanci — Plane airspeed
+        // scaling'in su alti hali. Kazanclar TRPD_HIZ_REF'te (seyir) ayarli.
+        // DIKKAT (saha dersi): hiz 3B olmali — groundspeed() YATAY'dir; dik
+        // dalis/cikista yatay bilesen kuculunce olcek yanlislikla tavana
+        // firlayip ani savrulma yaratti. Ayrica olcek LPF'lenir (ani kazanc
+        // sicramasi tork basamagi olusturmasin) ve kiskaclar dar tutulur.
+        {
+            static constexpr float TRPD_HIZ_REF = 2.0f;   // m/s; kazanclarin ayarlandigi seyir hizi
+            static constexpr float TRPD_HIZ_MIN = 0.7f;   // m/s; altinda olcek ust kiskaca oturur
+            static float trpd_olcek_f = 1.0f;             // LPF durumu
+            float trpd_v = TRPD_HIZ_REF;                  // hiz okunamazsa olcek ~1 (guvenli)
+            Vector3f trpd_vel;
+            if (ahrs.get_velocity_NED(trpd_vel)) {
+                trpd_v = trpd_vel.length();               // 3B su hizi (dikey dahil)
+            }
+            const float trpd_ham = constrain_float(sq(TRPD_HIZ_REF / MAX(trpd_v, TRPD_HIZ_MIN)), 0.6f, 2.0f);
+            trpd_olcek_f += 0.05f * (trpd_ham - trpd_olcek_f);   // ~yarim saniyelik yumusatma
+            motors.set_torpedo_kazanc_olcek(trpd_olcek_f);
+        }
         motors.set_interlock(true);
         SRV_Channels::cork();
         SRV_Channels::calc_pwm();

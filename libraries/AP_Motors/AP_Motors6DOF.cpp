@@ -360,6 +360,18 @@ void AP_Motors6DOF::output_armed_stabilizing()
             }
         }
 
+        // AURA torpido: hiz-olcekli fin kazanci — fin momenti ~ hiz^2, sapma
+        // komutu arac kodunun verdigi 1/v^2 tabanli olcekle duzeltilir (dusuk
+        // hizda daha cok sapma, yuksek hizda daha az). Yalniz TORPEDO_XTAIL;
+        // diger frame'lerde olcek 1.0 (Sub davranisi bit-bit ayni).
+        if ((sub_frame_t)_active_frame_class == SUB_FRAME_TORPEDO_XTAIL) {
+            for (i=0; i<AP_MOTORS_MAX_NUM_MOTORS; i++) {
+                if (motor_enabled[i]) {
+                    rpy_out[i] *= _trpd_kazanc_olcek;
+                }
+            }
+        }
+
         // calculate linear command for each motor
         // linear factors should be 0.0 or 1.0 for now
         for (i=0; i<AP_MOTORS_MAX_NUM_MOTORS; i++) {

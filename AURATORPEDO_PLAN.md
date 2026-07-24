@@ -57,9 +57,21 @@ Taban: **ArduSub kopyası** (derinlik/EKF/failsafe/joystick + aura yamaları haz
   yalnız Gazebo yolunda (Faz 4.2 ArduPilotPlugin kanal haritası SIRADAKİ İŞ).
 
 ## Faz 3 — Kontrol mimarisi (torpidoya özgü asıl iş)
-- ⬜ 3.1 Attitude: AC_AttitudeControl_Sub rate PID çıkışları → set_roll/pitch/yaw
-  → X-Tail mixer. İlk sürüm sabit gain; sonra hızla gain ölçekleme
-  (fin otoritesi ∝ hız²; EKF hızı ya da pervane komutu vekil)
+- ✅ 3.1 TAMAM (2026-07-25): hız-ölçekli fin kazancı (Plane airspeed scaling'in
+  su altı hali). AP_Motors6DOF: `set_torpedo_kazanc_olcek()` + rpy_out ölçeği
+  (YALNIZ TORPEDO_XTAIL frame'inde — Sub bit-bit aynı); Torpedo::motors_output():
+  ölçek = (2.0/v)² kıskaç [0.6, 2.0] + ~0.5 sn LPF. TEST: düşük hız ilk tepki %45
+  daha atak; 2.57 m/s tam yolda pitch tepe 1.8° salınımsız. ArduSub regresyonu temiz.
+  SAHA DERSİ (kullanıcı yakaladı): hız 3B OLMALI — groundspeed() yatay olduğundan
+  dik dalışta ölçek tavana fırlayıp ANİ SAVRULMA yaptı; get_velocity_NED().length()
+  + LPF + dar kıskaçla düzeltildi. Stres testi: tam yolda 3× sert dal-çık + dönüşlü
+  dalış → yaw sabit, tepe örneklem sıçraması 3.4°, savrulma yok ✓
+- ✅ DÖNÜŞ GERÇEKÇİLİĞİ (2026-07-25, kullanıcı geri bildirimi "oyun gibi anında
+  dönüyor"): torpedo-aura.parm ATC_RATE_Y_MAX 12 + ACRO_YAW_P 1.2 + ATC_SLEW_YAW
+  1200 (+pitch/roll 45) ve her iki model SDF'inde mQabsQ/nRabsR −5→−30.
+  TEST: tam çubukta kademeli kurulum (3 sn'de 2.7°/s), kararlı ~5.5°/s →
+  dönüş yarıçapı ~27 m (13.5 gövde boyu — gerçekçi bant). His ayar düğmeleri:
+  daha çevik istenirse ATC_RATE_Y_MAX 15 ve/veya nRabsR −15
 - ✅ 3.2 TAMAM (2026-07-24): ALT_HOLD torpido hali — derinlik hatası → pitch hedefi
   (P=12°/m, D=9°/(m/s), sınır ±30°, 0.8 m/s altında otorite lineer kısılır;
   update_z_controller çağrılmaz). Satıh tavanı (≥0.3 m) döngüde. Pilot throttle
