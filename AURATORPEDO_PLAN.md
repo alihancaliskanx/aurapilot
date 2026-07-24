@@ -71,8 +71,12 @@ Taban: **ArduSub kopyası** (derinlik/EKF/failsafe/joystick + aura yamaları haz
   fareyle imkânsızdı) + hedef windup kıskacı (araç ±3 m bandı) + saplanma koruması
   (istenen yönün tersine eğikken gaz kesilir — burun tabana saplanınca çıkış
   kilitleniyordu). TEST: durgun araç yalnız throttle ile −8 dalış/−11.5 tutma/−1.7 çıkış ✓
-- 🟡 3.3 Modlar: MANUAL ✓, STABILIZE ✓, ALT_HOLD ✓, **AUTO ✓**, **GUIDED ✓ (2026-07-24)**;
-  SURFACE bekliyor
+- ✅ 3.3 Modlar TAMAM (çekirdek küme): MANUAL, STABILIZE, ALT_HOLD, AUTO, GUIDED,
+  **SURFACE (2026-07-25)** — torpido SURFACE: pitch(+30°) + oto-gaz ile satha,
+  windup kıskacı + saplanma koruması ALT_HOLD ile aynı; satıhta ALT_HOLD'a
+  otomatik devir (Sub sözleşmesi korunur → failsafe zinciri çalışır).
+  TEST: −14.9 m'den 24 sn'de çubuksuz satha çıkış + devir ✓.
+  CIRCLE/POSHOLD bilinçli ertelendi
 - ✅ GUIDED torpido (mode_guided.cpp): pos = pure-pursuit (AUTO deseni); vel = hız
   vektörü yönüne yaw + büyüklüğe forward (250 cm/s tam yol) + vz→derinlik;
   posvel benzer; angle = pitch döngüsü komutun üstüne. Yaw üç alt-modda da
