@@ -31,19 +31,13 @@ ModeSurftrak::ModeSurftrak() :
 
 bool ModeSurftrak::init(bool ignore_checks)
 {
-    if (!ModeAlthold::init(ignore_checks)) {
-        return false;
-    }
-
-    reset();
-
-    if (!torpedo.rangefinder_alt_ok()) {
-        torpedo.gcs().send_text(MAV_SEVERITY_INFO, "waiting for a rangefinder reading");
-    } else if (torpedo.inertial_nav.get_position_z_up_cm() >= torpedo.g.surftrak_depth) {
-        torpedo.gcs().send_text(MAV_SEVERITY_WARNING, "descend below %f meters to hold range", torpedo.g.surftrak_depth * 0.01f);
-    }
-
-    return true;
+    // AURA torpido: SURFTRAK (taban takip) henuz portlanmadi. control_range()
+    // dikey-itici throttle yolunu (update_z_controller) kullaniyor, torpidoda o
+    // yol olu (finlerde throttle faktoru 0) -> mod derinlik/mesafe tutmaz.
+    // Taban-takip range->pitch dis dongusu yazilana ve altitude kaynagi
+    // (rangefinder/DVL) baglanana kadar mod kapali (karma karar 2026-07-25).
+    torpedo.gcs().send_text(MAV_SEVERITY_WARNING, "SURFTRAK torpido icin henuz hazir degil");
+    return false;
 }
 
 void ModeSurftrak::run()

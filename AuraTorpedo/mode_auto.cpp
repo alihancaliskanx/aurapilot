@@ -270,16 +270,20 @@ void ModeAuto::auto_circle_run()
     float lateral_out, forward_out;
     torpedo.translate_circle_nav_rp(lateral_out, forward_out);
 
-    // Send to forward/lateral outputs
-    motors.set_lateral(lateral_out);
+    // AURA torpido: lateral yok (holonomik degil); daire ilerlemesi forward'dan
+    motors.set_lateral(0.0f);
     motors.set_forward(forward_out);
 
-    // WP_Nav has set the vertical position control targets
-    // run the vertical position controller and set output throttle
-    position_control->update_z_controller();
+    // AURA torpido: update_z_controller CAGRILMAZ (throttle yolu olu); WP_Nav'in
+    // koydugu z hedefi derinlik-pitch dongusuyle izlenir (auto_wp_run ile ayni).
+    // NOT: tam CIRCLE portu (yaricap/yaw ayari) ileride; bu en az derinligi guvenli tutar.
+    const float trpd_pitch_cd = trpd_derinlik_pitch_cd();
 
-    // roll & pitch from waypoint controller, yaw rate from pilot
-    attitude_control->input_euler_angle_roll_pitch_yaw(channel_roll->get_control_in(), channel_pitch->get_control_in(), torpedo.circle_nav.get_yaw(), true);
+    // roll & pitch from waypoint controller + derinlik pitch, yaw from circle_nav
+    attitude_control->input_euler_angle_roll_pitch_yaw(
+        channel_roll->get_control_in(),
+        constrain_float(channel_pitch->get_control_in() + trpd_pitch_cd, -4000.0f, 4000.0f),
+        torpedo.circle_nav.get_yaw(), true);
 }
 
 #if NAV_GUIDED == ENABLED

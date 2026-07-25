@@ -7,22 +7,13 @@
 // circle_init - initialise circle controller flight mode
 bool ModeCircle::init(bool ignore_checks)
 {
-    if (!torpedo.position_ok()) {
-        return false;
-    }
-
-    torpedo.circle_pilot_yaw_override = false;
-
-    // initialize speeds and accelerations
-    position_control->set_max_speed_accel_xy(torpedo.wp_nav.get_default_speed_xy(), torpedo.wp_nav.get_wp_acceleration());
-    position_control->set_correction_speed_accel_xy(torpedo.wp_nav.get_default_speed_xy(), torpedo.wp_nav.get_wp_acceleration());
-    position_control->set_max_speed_accel_z(-torpedo.get_pilot_speed_dn(), g.pilot_speed_up, g.pilot_accel_z);
-    position_control->set_correction_speed_accel_z(-torpedo.get_pilot_speed_dn(), g.pilot_speed_up, g.pilot_accel_z);
-
-    // initialise circle controller including setting the circle center based on vehicle speed
-    torpedo.circle_nav.init();
-
-    return true;
+    // AURA torpido: manuel CIRCLE henuz portlanmadi — run() dikey-itici throttle
+    // yolunu (update_z_controller) kullaniyor, torpidoda o yol olu -> derinlik
+    // tutmaz. Ileride pure-pursuit + derinlik-pitch ile portlanacak (karma karar
+    // 2026-07-25). Not: AUTO icindeki DO_CIRCLE (auto_circle_run) derinlik-guvenli
+    // hale getirildi, ayri.
+    torpedo.gcs().send_text(MAV_SEVERITY_WARNING, "CIRCLE torpido icin henuz hazir degil");
+    return false;
 }
 
 // circle_run - runs the circle flight mode
