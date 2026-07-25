@@ -116,7 +116,7 @@ Taban: **ArduSub kopyası** (derinlik/EKF/failsafe/joystick + aura yamaları haz
   pozitif yüzerlikle satha süzül" olmalı; leak/batarya failsafe'leri aynen
 
 ## Faz 4 — Gazebo simülasyonu
-- ✅ 4.0 Sim deposu branch'i: `auv_simulation` → `torpedo`; boş dünya
+- ✅ 4.0 Sim deposu branch'i: `simulation` → `torpedo`; boş dünya
   `aura_worlds/deniz_torpido.sdf` (deniz_sitl altyapısı, araç/görev öğesi yok,
   600x600 m alan)
 - ✅ 4.1 Model: `auv_simulation/aura_models/aura_torpedo/` — ECA A9 referanslı
