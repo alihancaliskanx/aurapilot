@@ -41,6 +41,7 @@ void ModeSurface::run()
     // Already at surface, hold depth at surface
     if (torpedo.ap.at_surface) {
         set_mode(Mode::Number::ALT_HOLD, ModeReason::SURFACE_COMPLETE);
+        return;   // mod degisti (ALT_HOLD devraldi); run()'in kalani gereksiz
     }
 
     // set target climb rate (log tutarliligi icin Sub'daki gibi kaydedilir)

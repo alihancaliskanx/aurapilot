@@ -7,7 +7,6 @@ bool ModeStabilize::init(bool ignore_checks) {
     torpedo.last_pilot_heading = ahrs.yaw_sensor;
 
     return true;
-    return true;
 }
 
 void ModeStabilize::run()

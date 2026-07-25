@@ -310,6 +310,10 @@ float Mode::trpd_derinlik_pitch_cd() const
     const float hata_m     = (hedef_z_cm - z_cm) * 0.01f;              // + = yukari cikilmali
     const float w_ms       = inertial_nav.get_velocity_z_up_cms() * 0.01f;
     float pitch_cd = TRPD_Z2P_KP_CD * hata_m - TRPD_Z2P_KD_CD * w_ms;  // +pitch = burun yukari (FRD)
-    const float olcek = constrain_float(ahrs.groundspeed() / TRPD_Z2P_MIN_SPD, 0.0f, 1.0f);
+    // Hiz 3B olmali (motors.cpp ile tutarli): groundspeed() YATAY'dir, dik dalista
+    // dusuk gorunup fin otoritesini yanlis kisar. get_velocity_NED yoksa groundspeed'e dus.
+    Vector3f trpd_vel;
+    const float trpd_hiz = ahrs.get_velocity_NED(trpd_vel) ? trpd_vel.length() : ahrs.groundspeed();
+    const float olcek = constrain_float(trpd_hiz / TRPD_Z2P_MIN_SPD, 0.0f, 1.0f);
     return constrain_float(pitch_cd, -TRPD_Z2P_MAX_CD, TRPD_Z2P_MAX_CD) * olcek;
 }
