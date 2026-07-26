@@ -42,3 +42,7 @@
 [submodule "modules/lwip"]
 	path = modules/lwip
 	url = https://github.com/ArduPilot/lwip.git
+[submodule "libraries/AP_HAL_ChibiOS/hwdef/AuraFC"]
+	path = libraries/AP_HAL_ChibiOS/hwdef/AuraFC
+	url = git@github.com:KilavuzAura/AuraFC.git
+	branch = main
