@@ -5,7 +5,9 @@
 # ===== (1) ZORUNLU: arming + joystick kontrolu =====
 ARMING_CHECK     0        # gercek=448; RC-channels on-kosulu SITL'de joystick arm'i engeller
 RC_OPTIONS       0        # gercek=32 (strict-RC biti); duz RC-override yolu
-RC3_TRIM         1500     # gercek=1100 -> stick merkezde arac yukari cikar; 1500 = dikey notr (PWM1500=0N)
+RC3_TRIM         1100     # gercek arac ile AYNI (26 Tem simde dogrulandi; docker/verify_sitl.py de 1100 varsayar).
+                          # Eski 1500 denemesi geri alindi: dikey notru 1500'e almak MANUAL'de stick
+                          # merkezdeyken kalici asagi/yukari itki birakiyordu.
 
 # ===== Motor yonleri: sim BlueROV2-Heavy geometrisi -> ArduSub VARSAYILANI (+1) =====
 # (Gercek aracin MOT_x_DIRECTION kalibrasyonu sim geometrisine UYMAZ; "ileri" komutu yana surer.
@@ -21,6 +23,8 @@ MOT_8_DIRECTION  1
 
 # ===== (2) STABILITE / GERCEKCILIK =====
 BARO_PRIMARY     0        # gercek birincil baro #3 (harici); SITL sadece baro #0 simule eder
+PSC_ACCZ_IMAX    500      # gercek=100; sim govdesi agir/yuzdurmesi farkli -> dikey ivme
+                          # kontrolcusunun I payi 100'de doyup derinlik hedefine oturamiyordu
 # EKF (EK3) + DVL/ExternalNav kaynak TANIMLARI last.params'tan gelir, EZILMEZ:
 #   sub-aura.parm: AHRS_EKF_TYPE=3, EK3_SRC1_POSXY/VELXY=6 (ExternalNav/DVL), POSZ=1 (baro),
 #   YAW=1 (pusula), VISO_TYPE=1, VISO_POS/VEL/YAW_M_NSE gurultu ayarlari.
