@@ -8,19 +8,32 @@
  *  Code in this file implements the navigation commands
  */
 
-// AURA sig-su satih tavani (GOREV_ALGORITMASI.md §7): AUTO'da dikey hedef
-// satihtan en az 0.3 m derinlikte tutulur. Sig suda terrain hedefi
-// ("tabandan +1 m") su seviyesinin USTUNE dusebilir -> arac satihta durmadan
-// yukari iter (Bar30 da <0.2-0.3 m'de saglikli okumaz). 4.5.3'te terrain
-// ofseti wp_nav tarafindan pos_target'a dahil edildiginden clamp dogrudan
-// hedefe uygulanir; her dongude yeniden hesaplanir (rangefinder/terrain
-// degisimini izler). (master 6621332'nin 4.5.3 portu; desired/target ayrimi
-// 4.5'te yok, get/set_pos_target_z_cm kullanilir.)
-static void aura_satih_tavani_uygula(AC_PosControl *position_control)
+// AURA sig-su satih tavani (GOREV_ALGORITMASI.md §7): SEYIRDE dikey hedef
+// satihtan en az 0.3 m derinlikte tutulur — arac su altinda ilerlerken
+// istemeden satha cikmasin. Sig suda terrain hedefi ("tabandan +1 m") su
+// seviyesinin USTUNE dusebilir -> arac satihta durmadan yukari iterdi.
+//
+// ISTISNA: gorevin ACIKCA komutladigi satih waypoint'i (ornegin alt = -0.1 m)
+// tavandan sig ise ona izin verilir; tavan yalnizca ISTEMEDEN satha cikmayi
+// engeller, satha cikma emrini bogmaz. (Satih WP'si -0.1 m'dir: govde ~35 cm,
+// derinlik sensoru dikey ortada -> sensor 10 cm su altinda kalirken kamera
+// suyun disinda olur.) Istisna yalnizca terrain-frame OLMAYAN bacaklar icin:
+// terrain bacaginda hedef z tabandan olcudur, satih tavaniyla kiyaslanamaz.
+//
+// 4.5.3'te terrain ofseti wp_nav tarafindan pos_target'a dahil edildiginden
+// clamp dogrudan hedefe uygulanir; her dongude yeniden hesaplanir
+// (rangefinder/terrain degisimini izler). (master 6621332'nin 4.5.3 portu;
+// desired/target ayrimi 4.5'te yok, get/set_pos_target_z_cm kullanilir.)
+static void aura_satih_tavani_uygula(AC_PosControl *position_control, const AC_WPNav &wp_nav)
 {
     constexpr float SATIH_TAVANI_Z_CM = -30.0f;   // NEU z (yukari, cm; 0 = satih)
-    if (position_control->get_pos_target_z_cm() > SATIH_TAVANI_Z_CM) {
-        position_control->set_pos_target_z_cm(SATIH_TAVANI_Z_CM);
+    float tavan_z_cm = SATIH_TAVANI_Z_CM;
+    if (!wp_nav.origin_and_destination_are_terrain_alt()) {
+        // komut edilen hedef daha sigsa (satha cikis WP'si) tavani ona ac
+        tavan_z_cm = MAX(tavan_z_cm, wp_nav.get_wp_destination().z);
+    }
+    if (position_control->get_pos_target_z_cm() > tavan_z_cm) {
+        position_control->set_pos_target_z_cm(tavan_z_cm);
     }
 }
 bool ModeAuto::init(bool ignore_checks) {
@@ -150,7 +163,7 @@ void ModeAuto::auto_wp_run()
     // TODO implement waypoint radius individually for each waypoint based on cmd.p2
     // TODO fix auto yaw heading to switch to something appropriate when mission complete and switches to loiter
     sub.failsafe_terrain_set_status(sub.wp_nav.update_wpnav());
-    aura_satih_tavani_uygula(position_control);   // sig-su: hedef satihtan >= 0.3 m derinde
+    aura_satih_tavani_uygula(position_control, sub.wp_nav);   // seyirde hedef satihtan >= 0.3 m derinde (satih WP haric)
 
     ///////////////////////
     // update xy outputs //
@@ -336,7 +349,7 @@ void ModeAuto::auto_loiter_run()
 
     // run waypoint and z-axis position controller
     sub.failsafe_terrain_set_status(sub.wp_nav.update_wpnav());
-    aura_satih_tavani_uygula(position_control);   // sig-su: hedef satihtan >= 0.3 m derinde
+    aura_satih_tavani_uygula(position_control, sub.wp_nav);   // seyirde hedef satihtan >= 0.3 m derinde (satih WP haric)
 
     ///////////////////////
     // update xy outputs //
