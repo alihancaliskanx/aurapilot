@@ -45,3 +45,7 @@
 [submodule "modules/littlefs"]
 	path = modules/littlefs
 	url = https://github.com/ArduPilot/littlefs.git
+[submodule "libraries/AP_HAL_ChibiOS/hwdef/AuraFC"]
+	path = libraries/AP_HAL_ChibiOS/hwdef/AuraFC
+	url = git@github.com:KilavuzAura/AuraFC.git
+	branch = main
