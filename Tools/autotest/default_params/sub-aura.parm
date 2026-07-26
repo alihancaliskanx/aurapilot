@@ -1022,7 +1022,7 @@ WPNAV_ACCEL            2.5e+02
 WPNAV_ACCEL_C          0
 WPNAV_ACCEL_Z          1e+02
 WPNAV_JERK             1
-WPNAV_RADIUS           2e+02
+WPNAV_RADIUS           5e+01
 WPNAV_RFND_USE         1
 WPNAV_SPEED            1e+02
 WPNAV_SPEED_DN         1.5e+02
