@@ -213,6 +213,20 @@ public:
         uint8_t relative_angle; // 0 = absolute angle, 1 = relative angle
     };
 
+    // AURA: "drop anchor" mission command.
+    // Declared as MAV_CMD_USER_1 (31010) on the wire; hasLocation=false, so the
+    // content union is free and the command carries no Location (it anchors
+    // wherever the vehicle happens to be).
+    // 16-bit id -> 10 bytes of payload in storage, this struct uses 8.
+    static constexpr uint16_t MAV_CMD_AURA_ANCHOR = 31010;
+
+    struct PACKED Aura_Anchor_Command {
+        uint16_t duration_s;       // anchor duration (s); counted once settled
+        uint16_t settle_radius_cm; // settle radius (cm), 0 = settle gate disabled
+        uint16_t settle_time_s;    // uninterrupted time to stay inside the radius (s)
+        uint16_t guard_time_s;     // overall ceiling (s), 0 = auto (duration*3 + 30)
+    };
+
     // winch command structure
     struct PACKED Winch_Command {
         uint8_t num;            // winch number
@@ -361,6 +375,9 @@ public:
 
         // NAV_SET_YAW_SPEED support
         Set_Yaw_Speed set_yaw_speed;
+
+        // AURA drop anchor
+        Aura_Anchor_Command aura_anchor;
 
         // do-winch
         Winch_Command winch;
@@ -745,12 +762,16 @@ public:
     }
 #endif
 
+    // AURA: made public - vehicle code (ArduSub::start_command) needs to know
+    // whether a command really carries a Location in its content union.
+    // is_nav_cmd() alone is not enough: NAV_DELAY / NAV_RETURN_TO_LAUNCH /
+    // NAV_SET_YAW_SPEED / AURA_ANCHOR are nav commands yet carry no Location.
+    static bool stored_in_location(uint16_t id);
+
 private:
     static AP_Mission *_singleton;
 
     static StorageAccess _storage;
-
-    static bool stored_in_location(uint16_t id);
 
     struct {
         uint16_t age;   // a value of 0 means we have never seen a tag. Once a tag is seen, age will increment every time the mission index changes.

@@ -91,6 +91,10 @@ void ModeAuto::run()
     case Auto_TerrainRecover:
         auto_terrain_recover_run();
         break;
+
+    case Auto_Anchor:
+        auto_anchor_run();
+        break;
     }
 }
 
@@ -370,6 +374,37 @@ void ModeAuto::auto_loiter_run()
 
     // roll & pitch & yaw rate from pilot
     attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw(target_roll, target_pitch, target_yaw_rate);
+}
+
+// AURA: auto_anchor_start - drop anchor
+//  Makes the current stopping point the wp_nav destination; the vehicle holds that
+//  point closed-loop (AC_PosControl XY PID, the same controller as POSHOLD).
+//  Fails when there is no position source.
+bool ModeAuto::auto_anchor_start()
+{
+    if (!sub.position_ok()) {
+        return false;
+    }
+
+    sub.auto_mode = Auto_Anchor;
+
+    // compute the stopping point and lock it in as the destination
+    Vector3f stopping_point;
+    sub.wp_nav.get_wp_stopping_point(stopping_point);
+    sub.wp_nav.set_wp_destination(stopping_point);
+
+    // hold the current heading (do not turn while anchored)
+    set_auto_yaw_mode(AUTO_YAW_HOLD);
+
+    return true;
+}
+
+// AURA: auto_anchor_run - controller while anchored
+//  Called by auto_run at 100 Hz or above.
+//  Identical to loiter: wp_nav holds the locked destination, surface ceiling applies.
+void ModeAuto::auto_anchor_run()
+{
+    auto_loiter_run();
 }
 
 
