@@ -21,7 +21,8 @@ enum AutoSubMode {
     Auto_Circle,
     Auto_NavGuided,
     Auto_Loiter,
-    Auto_TerrainRecover
+    Auto_TerrainRecover,
+    Auto_Anchor          // AURA: drop anchor - lock the current point
 };
 
 // RTL states
@@ -325,6 +326,7 @@ public:
     void set_auto_yaw_look_at_heading(float angle_deg, float turn_rate_dps, int8_t direction, uint8_t relative_angle);
     void set_yaw_rate(float turn_rate_dps);
     bool auto_terrain_recover_start();
+    bool auto_anchor_start();
 
 protected:
 
@@ -338,6 +340,7 @@ private:
     void auto_nav_guided_run();
     void auto_loiter_run();
     void auto_terrain_recover_run();
+    void auto_anchor_run();
 };
 
 

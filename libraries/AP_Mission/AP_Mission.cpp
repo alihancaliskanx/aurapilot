@@ -543,7 +543,9 @@ bool AP_Mission::is_nav_cmd(const Mission_Command& cmd)
     return (cmd.id <= MAV_CMD_NAV_LAST ||
             cmd.id == MAV_CMD_NAV_SET_YAW_SPEED ||
             cmd.id == MAV_CMD_NAV_SCRIPT_TIME ||
-            cmd.id == MAV_CMD_NAV_ATTITUDE_TIME);
+            cmd.id == MAV_CMD_NAV_ATTITUDE_TIME ||
+            // AURA: drop anchor is a NAV command -> blocks the mission until verify passes
+            cmd.id == MAV_CMD_AURA_ANCHOR);
 }
 
 /// get_next_nav_cmd - gets next "navigation" command found at or after start_index
@@ -1411,6 +1413,14 @@ MAV_MISSION_RESULT AP_Mission::mavlink_int_to_mission_cmd(const mavlink_mission_
         break;
 #endif
 
+    // AURA: drop anchor
+    case MAV_CMD_AURA_ANCHOR:
+        cmd.content.aura_anchor.duration_s = constrain_float(packet.param1, 0, UINT16_MAX);
+        cmd.content.aura_anchor.settle_radius_cm = constrain_float(packet.param2 * 100.0f, 0, UINT16_MAX);
+        cmd.content.aura_anchor.settle_time_s = constrain_float(packet.param3, 0, UINT16_MAX);
+        cmd.content.aura_anchor.guard_time_s = constrain_float(packet.param4, 0, UINT16_MAX);
+        break;
+
     case MAV_CMD_NAV_ATTITUDE_TIME:
         cmd.content.nav_attitude_time.time_sec = constrain_float(packet.param1, 0, UINT16_MAX);
         cmd.content.nav_attitude_time.roll_deg = (fabsf(packet.param2) <= 180) ? packet.param2 : 0;
@@ -1932,6 +1942,14 @@ bool AP_Mission::mission_cmd_to_mavlink_int(const AP_Mission::Mission_Command& c
         packet.y = cmd.content.nav_script_time.arg4;
         break;
 #endif
+
+    // AURA: drop anchor
+    case MAV_CMD_AURA_ANCHOR:
+        packet.param1 = cmd.content.aura_anchor.duration_s;
+        packet.param2 = cmd.content.aura_anchor.settle_radius_cm * 0.01f;
+        packet.param3 = cmd.content.aura_anchor.settle_time_s;
+        packet.param4 = cmd.content.aura_anchor.guard_time_s;
+        break;
 
     case MAV_CMD_NAV_ATTITUDE_TIME:
         packet.param1 = cmd.content.nav_attitude_time.time_sec;
@@ -2920,6 +2938,8 @@ const char *AP_Mission::Mission_Command::type() const
 #endif
     case MAV_CMD_NAV_ATTITUDE_TIME:
         return "NavAttitudeTime";
+    case MAV_CMD_AURA_ANCHOR:
+        return "Anchor";
     case MAV_CMD_DO_PAUSE_CONTINUE:
         return "PauseContinue";
     case MAV_CMD_DO_GIMBAL_MANAGER_PITCHYAW:

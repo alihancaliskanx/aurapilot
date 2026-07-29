@@ -7,11 +7,15 @@ static enum AutoSurfaceState auto_surface_state = AUTO_SURFACE_STATE_GO_TO_LOCAT
 // start_command - this function will be called when the ap_mission lib wishes to start a new command
 bool Sub::start_command(const AP_Mission::Mission_Command& cmd)
 {
-    // Altitude-frame validation only makes sense for NAV commands: DO/CONDITION
-    // commands (e.g. CONDITION_YAW, DO_DIGICAM_CONTROL) store their payload in the
-    // same union as `location`, so reading it as a Location yields garbage and the
-    // check below would reject them with "Bad alt frame" (seen with CONDITION_YAW).
-    if (AP_Mission::is_nav_cmd(cmd)) {
+    // Altitude-frame validation only makes sense for commands that actually carry a
+    // Location: DO/CONDITION commands (e.g. CONDITION_YAW, DO_DIGICAM_CONTROL) store
+    // their payload in the same union as `location`, so reading it as a Location
+    // yields garbage and the check below would reject them with "Bad alt frame"
+    // (seen with CONDITION_YAW).
+    // is_nav_cmd() alone is NOT enough: NAV_DELAY, NAV_RETURN_TO_LAUNCH,
+    // NAV_SET_YAW_SPEED and AURA_ANCHOR are nav commands without a Location.
+    // stored_in_location() is the correct predicate.
+    if (AP_Mission::is_nav_cmd(cmd) && AP_Mission::stored_in_location(cmd.id)) {
         const Location &target_loc = cmd.content.location;
         auto alt_frame = target_loc.get_alt_frame();
 
@@ -68,6 +72,10 @@ bool Sub::start_command(const AP_Mission::Mission_Command& cmd)
 
     case MAV_CMD_NAV_DELAY:                    // 93 Delay the next navigation command
         do_nav_delay(cmd);
+        break;
+
+    case AP_Mission::MAV_CMD_AURA_ANCHOR:       // 31010 AURA: drop anchor
+        do_anchor(cmd);
         break;
 
         //
@@ -179,6 +187,9 @@ bool Sub::verify_command(const AP_Mission::Mission_Command& cmd)
 
     case MAV_CMD_NAV_DELAY:
         return verify_nav_delay(cmd);
+
+    case AP_Mission::MAV_CMD_AURA_ANCHOR:
+        return verify_anchor(cmd);
 
         ///
         /// conditional commands
@@ -378,6 +389,31 @@ void Sub::do_nav_delay(const AP_Mission::Mission_Command& cmd)
     gcs().send_text(MAV_SEVERITY_INFO, "Delaying %u sec", (unsigned)(nav_delay_time_max_ms/1000));
 }
 
+// AURA: do_anchor - drop anchor. The vehicle locks its current point and does
+// not advance to the next waypoint until it has settled there.
+//   param1 -> duration_s       : anchor duration (s), counted AFTER settling
+//   param2 -> settle_radius_cm : settle radius (cm), 0 = settle gate disabled
+//   param3 -> settle_time_s    : uninterrupted time required inside the radius (s)
+//   param4 -> guard_time_s     : overall ceiling (s), 0 = auto (duration*3 + 30)
+void Sub::do_anchor(const AP_Mission::Mission_Command& cmd)
+{
+    anchor_start_ms = AP_HAL::millis();
+    anchor_settle_ms = 0;
+    anchor_hold_ms = 0;
+    anchor_skipped = false;
+
+    if (!mode_auto.auto_anchor_start()) {
+        // no position source (DVL/UGPS/EKF) -> cannot anchor.
+        // Skip the command so the mission is not blocked.
+        gcs().send_text(MAV_SEVERITY_WARNING, "Anchor: no position, skipping");
+        anchor_skipped = true;
+        return;
+    }
+
+    gcs().send_text(MAV_SEVERITY_INFO, "Anchor set: %u s",
+                    (unsigned)cmd.content.aura_anchor.duration_s);
+}
+
 #if NAV_GUIDED
 // do_guided_limits - pass guided limits to guided controller
 void Sub::do_guided_limits(const AP_Mission::Mission_Command& cmd)
@@ -525,6 +561,57 @@ bool Sub::verify_nav_delay(const AP_Mission::Mission_Command& cmd)
 {
     if (AP_HAL::millis() - nav_delay_time_start_ms > nav_delay_time_max_ms) {
         nav_delay_time_max_ms = 0;
+        return true;
+    }
+    return false;
+}
+
+// AURA: verify_anchor - is the anchor done?
+// Order: (1) guard ceiling, (2) settle gate, (3) anchor duration.
+// Waiting on the duration alone is not enough without the settle gate: once
+// WPNAV_RADIUS has been entered, AC_WPNav latches its reached_destination flag
+// and the mission advances even if the vehicle drifts away (AC_WPNav.cpp:540).
+bool Sub::verify_anchor(const AP_Mission::Mission_Command& cmd)
+{
+    if (anchor_skipped) {
+        return true;
+    }
+
+    const uint32_t now = AP_HAL::millis();
+
+    // 1) guard ceiling - guarantees the mission advances under any condition
+    uint32_t guard_ms = cmd.content.aura_anchor.guard_time_s * 1000UL;
+    if (guard_ms == 0) {
+        guard_ms = cmd.content.aura_anchor.duration_s * 3000UL + 30000UL;
+    }
+    if (now - anchor_start_ms >= guard_ms) {
+        gcs().send_text(MAV_SEVERITY_WARNING, "Anchor: guard time expired");
+        return true;
+    }
+
+    // 2) settle gate: horizontal distance to the locked target must stay inside
+    // the radius CONTINUOUSLY (get_wp_distance_to_destination is horizontal only)
+    const uint16_t radius_cm = cmd.content.aura_anchor.settle_radius_cm;
+    if (radius_cm > 0) {
+        if (wp_nav.get_wp_distance_to_destination() > (float)radius_cm) {
+            anchor_settle_ms = 0;      // left the radius -> reset the counter
+            return false;
+        }
+        if (anchor_settle_ms == 0) {
+            anchor_settle_ms = now;
+        }
+        if (now - anchor_settle_ms < cmd.content.aura_anchor.settle_time_s * 1000UL) {
+            return false;
+        }
+    }
+
+    // 3) settled -> count the anchor duration
+    if (anchor_hold_ms == 0) {
+        anchor_hold_ms = now;
+        gcs().send_text(MAV_SEVERITY_INFO, "Anchor: settled");
+    }
+    if (now - anchor_hold_ms >= cmd.content.aura_anchor.duration_s * 1000UL) {
+        gcs().send_text(MAV_SEVERITY_INFO, "Anchor released");
         return true;
     }
     return false;

@@ -281,6 +281,12 @@ private:
     uint32_t nav_delay_time_max_ms;  // used for delaying the navigation commands
     uint32_t nav_delay_time_start_ms;
 
+    // AURA: drop anchor state
+    uint32_t anchor_start_ms;   // when the command started (guard ceiling counts from here)
+    uint32_t anchor_settle_ms;  // when it entered the settle radius uninterrupted (0 = outside)
+    uint32_t anchor_hold_ms;    // settled, anchor duration starts here (0 = not yet)
+    bool anchor_skipped;        // could not anchor (no position source) -> skip the command
+
     // Battery Sensors
     AP_BattMonitor battery{MASK_LOG_CURRENT,
                            FUNCTOR_BIND_MEMBER(&Sub::handle_battery_failsafe, void, const char*, const int8_t),
@@ -540,6 +546,7 @@ private:
     void do_guided_limits(const AP_Mission::Mission_Command& cmd);
 #endif
     void do_nav_delay(const AP_Mission::Mission_Command& cmd);
+    void do_anchor(const AP_Mission::Mission_Command& cmd);
     void do_wait_delay(const AP_Mission::Mission_Command& cmd);
     void do_within_distance(const AP_Mission::Mission_Command& cmd);
     void do_yaw(const AP_Mission::Mission_Command& cmd);
@@ -556,6 +563,7 @@ private:
     bool verify_nav_guided_enable(const AP_Mission::Mission_Command& cmd);
 #endif
     bool verify_nav_delay(const AP_Mission::Mission_Command& cmd);
+    bool verify_anchor(const AP_Mission::Mission_Command& cmd);
 
     void failsafe_leak_check();
     void failsafe_internal_pressure_check();
