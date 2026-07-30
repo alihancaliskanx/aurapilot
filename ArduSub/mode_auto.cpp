@@ -329,7 +329,7 @@ bool ModeAuto::auto_loiter_start()
 
 // auto_loiter_run - loiter in AUTO flight mode
 //      called by auto_run at 100hz or more
-void ModeAuto::auto_loiter_run()
+void ModeAuto::auto_loiter_run(bool honour_auto_yaw)
 {
     // if not armed set throttle to zero and exit immediately
     if (!motors.armed()) {
@@ -372,8 +372,19 @@ void ModeAuto::auto_loiter_run()
     float target_roll, target_pitch;
     sub.get_pilot_desired_lean_angles(channel_roll->get_control_in(), channel_pitch->get_control_in(), target_roll, target_pitch, attitude_control->lean_angle_max_cd());
 
-    // roll & pitch & yaw rate from pilot
-    attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw_cd(target_roll, target_pitch, target_yaw_rate);
+    // AURA: stock loiter ignores auto_yaw_mode entirely, so a CONDITION_YAW running as
+    // the mission's do-command has no effect and verify_yaw() never reaches its target.
+    // Callers that need the mission to steer the heading pass honour_auto_yaw=true;
+    // this mirrors auto_wp_run() above.
+    // NOT (4.7): get_auto_heading() santiderece dondurur -> _cd varyanti sart,
+    // eksiz isim 4.7'de yok, _rad varyanti radyan bekler.
+    if (honour_auto_yaw && sub.auto_yaw_mode != AUTO_YAW_HOLD) {
+        // roll, pitch from pilot, yaw heading from auto_heading()
+        attitude_control->input_euler_angle_roll_pitch_yaw_cd(target_roll, target_pitch, get_auto_heading(), true);
+    } else {
+        // roll & pitch & yaw rate from pilot
+        attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw_cd(target_roll, target_pitch, target_yaw_rate);
+    }
 }
 
 // AURA: auto_anchor_start - drop anchor
@@ -393,7 +404,10 @@ bool ModeAuto::auto_anchor_start()
     sub.wp_nav.get_wp_stopping_point(stopping_point);
     sub.wp_nav.set_wp_destination(stopping_point);
 
-    // hold the current heading (do not turn while anchored)
+    // Default to holding the current heading: without this the previous leg's
+    // AUTO_YAW_LOOK_AT_NEXT_WP would survive and the vehicle would slew towards the
+    // next waypoint while anchored. A CONDITION_YAW in the mission still wins, because
+    // verify_yaw() re-asserts AUTO_YAW_LOOK_AT_HEADING on the next mission update.
     set_auto_yaw_mode(AUTO_YAW_HOLD);
 
     return true;
@@ -401,10 +415,11 @@ bool ModeAuto::auto_anchor_start()
 
 // AURA: auto_anchor_run - controller while anchored
 //  Called by auto_run at 100 Hz or above.
-//  Identical to loiter: wp_nav holds the locked destination, surface ceiling applies.
+//  Like loiter - wp_nav holds the locked destination, surface ceiling applies - but the
+//  heading follows auto_yaw_mode so a CONDITION_YAW can aim the camera before the photo.
 void ModeAuto::auto_anchor_run()
 {
-    auto_loiter_run();
+    auto_loiter_run(true);
 }
 
 
