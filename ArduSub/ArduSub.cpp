@@ -288,6 +288,14 @@ void Sub::one_hz_loop()
         motors.update_throttle_range();
     }
 
+    // AURA: bring the EKF origin up as soon as the EKF is ready instead of waiting
+    // for the first arm. Upstream only calls this from AP_Arming_Sub::arm(), so a
+    // GPS-less vehicle reports lat/lon 0,0 until it is armed once - the plan cannot
+    // be checked against the map and the vehicle icon sits on Null Island.
+    // Retried quietly: set_origin() is rejected until the EKF has initialised, so
+    // the first attempts after boot fail as a matter of course.
+    ensure_ekf_origin(false);
+
     // update assigned functions and enable auxiliary servos
     SRV_Channels::enable_aux_servos();
 
@@ -379,7 +387,10 @@ void Sub::stats_update(void)
 }
 #endif
 
-bool Sub::ensure_ekf_origin()
+// AURA: announce_failures=false is used by the 1 Hz retry from one_hz_loop(), which
+// runs before the EKF has initialised and would otherwise repeat the same warning
+// every second. Success is always announced.
+bool Sub::ensure_ekf_origin(bool announce_failures)
 {
     Location ekf_origin;
     if (ahrs.get_origin(ekf_origin)) {
@@ -399,18 +410,24 @@ bool Sub::ensure_ekf_origin()
                                   Location::AltFrame::ABSOLUTE);
 
     if (backup_origin.lat == 0 || backup_origin.lng == 0) {
-        gcs().send_text(MAV_SEVERITY_WARNING, "Backup location parameters are missing or zero");
+        if (announce_failures) {
+            gcs().send_text(MAV_SEVERITY_WARNING, "Backup location parameters are missing or zero");
+        }
         return false;
     }
 
     if (!check_latlng(backup_origin.lat, backup_origin.lng)) {
-        gcs().send_text(MAV_SEVERITY_WARNING, "Backup location parameters are not valid");
+        if (announce_failures) {
+            gcs().send_text(MAV_SEVERITY_WARNING, "Backup location parameters are not valid");
+        }
         return false;
     }
 
     if (!ahrs.set_origin(backup_origin)) {
         // a possible problem is that ek3_srcn_posxy is set to 3 (gps)
-        gcs().send_text(MAV_SEVERITY_WARNING, "Failed to set origin, check EK3_SRC parameters");
+        if (announce_failures) {
+            gcs().send_text(MAV_SEVERITY_WARNING, "Failed to set origin, check EK3_SRC parameters");
+        }
         return false;
     }
 
