@@ -268,6 +268,10 @@ private:
     uint16_t loiter_time_max;                // How long we should stay in Loiter Mode for mission scripting (time in seconds)
     uint32_t loiter_time;                    // How long have we been loitering - The start time in millis
 
+    // AURA: NAV_WAYPOINT guard ceiling (see do_nav_wp / verify_nav_wp)
+    uint32_t nav_wp_start_ms;   // when the waypoint started
+    uint32_t nav_wp_guard_ms;   // budget for it, 0 = no guard
+
     // Delay the next navigation command
     uint32_t nav_delay_time_max_ms;  // used for delaying the navigation commands
     uint32_t nav_delay_time_start_ms;

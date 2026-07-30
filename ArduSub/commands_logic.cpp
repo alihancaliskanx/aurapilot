@@ -262,6 +262,21 @@ void Sub::do_nav_wp(const AP_Mission::Mission_Command& cmd)
 
     // Set wp navigation target
     mode_auto.auto_wp_start(target_loc);
+
+    // AURA: guard ceiling. verify_nav_wp only ever asked "arrived + held", so a
+    // waypoint the vehicle cannot close on parked the mission for good - there is no
+    // other mission-item timeout in the tree except the anchor's own guard. On
+    // 30 Jul (log_266 item #12) the vehicle sat 91 s at the surface, 1.8 cm outside
+    // WPNAV_RADIUS, while a stale XY velocity integrator unwound at PSC_VELXY_I=0.02.
+    // Budget three times the straight-line travel time plus the hold, never under a
+    // minute; the legs that behave use a small fraction of that (the 14.6 m cruise
+    // leg in the same mission took 56 s against a ~140 s budget).
+    nav_wp_start_ms = AP_HAL::millis();
+    const float leg_cm = (wp_nav.get_wp_destination() - wp_nav.get_wp_origin()).length();
+    const float speed_cms = MAX(wp_nav.get_default_speed_xy(), 10.0f);
+    nav_wp_guard_ms = MAX((uint32_t)(3000.0f * leg_cm / speed_cms)
+                          + loiter_time_max * 1000UL + 30000UL,
+                          60000UL);
 }
 
 // do_surface - initiate surface procedure
@@ -477,6 +492,18 @@ void Sub::do_guided_limits(const AP_Mission::Mission_Command& cmd)
 // verify_nav_wp - check if we have reached the next way point
 bool Sub::verify_nav_wp(const AP_Mission::Mission_Command& cmd)
 {
+    // AURA: guard ceiling first - the mission must never park on a waypoint the
+    // vehicle cannot reach (see do_nav_wp for the budget). reached_wp_destination()
+    // is a one-way latch on a 3D WPNAV_RADIUS test, so without this there is no
+    // escape at all. Report how far short we gave up: that number is the whole
+    // diagnosis when it fires.
+    if (nav_wp_guard_ms != 0 && AP_HAL::millis() - nav_wp_start_ms >= nav_wp_guard_ms) {
+        gcs().send_text(MAV_SEVERITY_WARNING, "WP #%i: guard time expired, %.2fm short",
+                        cmd.index,
+                        (double)(wp_nav.get_wp_distance_to_destination() * 0.01f));
+        return true;
+    }
+
     // check if we have reached the waypoint
     if (!wp_nav.reached_wp_destination()) {
         return false;
@@ -649,6 +676,17 @@ bool Sub::verify_anchor(const AP_Mission::Mission_Command& cmd)
         }
     }
     if (now - anchor_start_ms >= guard_ms) {
+        // Last resort: the heading gate below is enforced continuously, so a vehicle
+        // that can never hold the aim would otherwise reach this point having taken
+        // no photo at all. A frame off-aim still beats an empty slot in the survey,
+        // and the distinct text says which one it was.
+        if (anchor.take_photo && !anchor_photo_done) {
+            anchor_photo_done = true;
+#if AP_CAMERA_ENABLED
+            camera.take_picture();
+#endif
+            gcs().send_text(MAV_SEVERITY_WARNING, "Anchor: photo off-aim (guard)");
+        }
         gcs().send_text(MAV_SEVERITY_WARNING, "Anchor: guard time expired");
         return true;
     }
@@ -675,11 +713,22 @@ bool Sub::verify_anchor(const AP_Mission::Mission_Command& cmd)
 
     // 3) on station -> turn to the camera heading, then 4) let the swing die out.
     // Same 2 deg tolerance as verify_yaw(); the guard above is the only timeout.
+    // The window is re-checked every call while a shutter is still pending, not
+    // latched once: a large turn overshoots and crosses the window on the way past,
+    // so a single latch starts the pre-shutter wait mid-swing and the photo goes off
+    // wherever the nose happens to be. 30 Jul log_266 t=1025.5, a 133 deg turn to
+    // 180: first inside the window at t=1029.28, then overshot to 172.95 (7.05 deg
+    // past), and the CAM record at t=1032.20 reads Y=174.43 - 5.57 deg off aim. The
+    // 64 deg turn at t=789.2 did not overshoot and landed on 90.14. Leaving the
+    // window restarts the wait; once the shutter is done (or there is none) the
+    // heading stops gating so the plain hold can finish.
+    const bool shutter_pending = anchor.take_photo && !anchor_photo_done;
+    if (anchor.yaw_valid && (shutter_pending || anchor_ready_ms == 0) &&
+        abs(wrap_180_cd(ahrs.yaw_sensor - yaw_look_at_heading)) > 200) {
+        anchor_ready_ms = 0;
+        return false;
+    }
     if (anchor_ready_ms == 0) {
-        if (anchor.yaw_valid &&
-            abs(wrap_180_cd(ahrs.yaw_sensor - yaw_look_at_heading)) > 200) {
-            return false;
-        }
         anchor_ready_ms = now;
     }
     if (anchor.take_photo && now - anchor_ready_ms < anchor.photo_delay_s * 1000UL) {
