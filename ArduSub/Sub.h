@@ -436,7 +436,7 @@ private:
     bool far_from_EKF_origin(const Location& loc);
     void exit_mission();
     void set_origin(const Location& loc);
-    bool ensure_ekf_origin(bool announce_failures = true);
+    bool ensure_ekf_origin();
     bool verify_loiter_unlimited();
     bool verify_loiter_time();
     bool verify_wait_delay();
