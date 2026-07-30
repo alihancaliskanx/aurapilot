@@ -1423,7 +1423,15 @@ MAV_MISSION_RESULT AP_Mission::mavlink_int_to_mission_cmd(const mavlink_mission_
         // in whole degrees with negative meaning "no turn" - the same convention the
         // plan generators already use for a target's heading. y is the shutter flag,
         // z the settle-on-heading wait before it fires.
-        cmd.content.aura_anchor.yaw_valid = (packet.x >= 0);
+        // Plans written before the turn and the shutter moved inside the anchor leave
+        // x, y and z at zero. Taken literally x=0 reads as "face north" - a heading the
+        // vehicle really would slew to at every stop, silently overriding whatever the
+        // plan meant. Both generators only ever emit a heading together with a shutter,
+        // so an all-zero triple can only be a legacy plan; treat it as "no turn".
+        {
+            const bool legacy_zero = (packet.x == 0) && (packet.y == 0) && is_zero(packet.z);
+            cmd.content.aura_anchor.yaw_valid = (packet.x >= 0) && !legacy_zero;
+        }
         cmd.content.aura_anchor.yaw_deg = cmd.content.aura_anchor.yaw_valid ? (packet.x % 360) : 0;
         cmd.content.aura_anchor.take_photo = (packet.y != 0);
         cmd.content.aura_anchor.photo_delay_s = constrain_float(packet.z, 0, 31);
