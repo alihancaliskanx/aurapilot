@@ -391,16 +391,22 @@ void Sub::do_nav_delay(const AP_Mission::Mission_Command& cmd)
 
 // AURA: do_anchor - drop anchor. The vehicle locks its current point and does
 // not advance to the next waypoint until it has settled there.
-//   param1 -> duration_s       : anchor duration (s), counted AFTER settling
+//   param1 -> duration_s       : anchor duration (s), counted AFTER the sequence
 //   param2 -> settle_radius_cm : settle radius (cm), 0 = settle gate disabled
 //   param3 -> settle_time_s    : uninterrupted time required inside the radius (s)
-//   param4 -> guard_time_s     : overall ceiling (s), 0 = auto (duration*3 + 30)
+//   param4 -> guard_time_s     : overall ceiling (s), 0 = auto
+//   x      -> yaw_deg          : camera heading (deg), negative = no turn
+//   y      -> take_photo       : 1 = fire the shutter
+//   z      -> photo_delay_s    : settle-on-heading wait before the shutter (s)
 void Sub::do_anchor(const AP_Mission::Mission_Command& cmd)
 {
     anchor_start_ms = AP_HAL::millis();
     anchor_settle_ms = 0;
+    anchor_ready_ms = 0;
     anchor_hold_ms = 0;
     anchor_skipped = false;
+    anchor_settled = false;
+    anchor_photo_done = false;
 
     if (!mode_auto.auto_anchor_start()) {
         // no position source (DVL/UGPS/EKF) -> cannot anchor.
@@ -410,8 +416,18 @@ void Sub::do_anchor(const AP_Mission::Mission_Command& cmd)
         return;
     }
 
-    gcs().send_text(MAV_SEVERITY_INFO, "Anchor set: %u s",
-                    (unsigned)cmd.content.aura_anchor.duration_s);
+    // Camera heading. auto_anchor_start() has just reset the yaw mode to HOLD, so
+    // this has to come after it. Turn rate 0 = the default AUTO_YAW_SLEW_RATE; the
+    // attitude controller slews at ATC_SLEW_YAW regardless, so a per-command rate
+    // would be ignored anyway.
+    if (cmd.content.aura_anchor.yaw_valid) {
+        mode_auto.set_auto_yaw_look_at_heading(cmd.content.aura_anchor.yaw_deg, 0.0f, 0, 0);
+    }
+
+    gcs().send_text(MAV_SEVERITY_INFO, "Anchor set: %u s%s%s",
+                    (unsigned)cmd.content.aura_anchor.duration_s,
+                    cmd.content.aura_anchor.yaw_valid ? ", turn" : "",
+                    cmd.content.aura_anchor.take_photo ? ", photo" : "");
 }
 
 #if NAV_GUIDED
@@ -567,22 +583,36 @@ bool Sub::verify_nav_delay(const AP_Mission::Mission_Command& cmd)
 }
 
 // AURA: verify_anchor - is the anchor done?
-// Order: (1) guard ceiling, (2) settle gate, (3) anchor duration.
+// Order: (1) guard ceiling, (2) settle gate, (3) camera heading, (4) shutter,
+//        (5) anchor duration.
 // Waiting on the duration alone is not enough without the settle gate: once
 // WPNAV_RADIUS has been entered, AC_WPNav latches its reached_destination flag
 // and the mission advances even if the vehicle drifts away (AC_WPNav.cpp:540).
+// Steps 3 and 4 used to be separate CONDITION_YAW / CONDITION_DELAY /
+// DO_DIGICAM_CONTROL items running as do-commands beside this one. That only
+// worked when the queue happened to finish inside the hold, because
+// advance_current_nav_cmd() drops a pending queue the moment the nav command
+// completes - a short hold silently meant no photo. Here the order is guaranteed.
 bool Sub::verify_anchor(const AP_Mission::Mission_Command& cmd)
 {
     if (anchor_skipped) {
         return true;
     }
 
+    const AP_Mission::Aura_Anchor_Command& anchor = cmd.content.aura_anchor;
     const uint32_t now = AP_HAL::millis();
 
     // 1) guard ceiling - guarantees the mission advances under any condition
-    uint32_t guard_ms = cmd.content.aura_anchor.guard_time_s * 1000UL;
+    uint32_t guard_ms = anchor.guard_time_s * 1000UL;
     if (guard_ms == 0) {
-        guard_ms = cmd.content.aura_anchor.duration_s * 3000UL + 30000UL;
+        // Auto ceiling. The turn and the pre-shutter wait now happen inside the
+        // anchor, so they have to be part of the budget: a plain duration*3 + 30
+        // could expire mid-turn and the shutter would never fire.
+        guard_ms = (anchor.duration_s + anchor.photo_delay_s) * 3000UL + 30000UL;
+        if (anchor.yaw_valid) {
+            // a 180 deg turn at the default slew rate takes the better part of 20 s
+            guard_ms += 30000UL;
+        }
     }
     if (now - anchor_start_ms >= guard_ms) {
         gcs().send_text(MAV_SEVERITY_WARNING, "Anchor: guard time expired");
@@ -591,7 +621,7 @@ bool Sub::verify_anchor(const AP_Mission::Mission_Command& cmd)
 
     // 2) settle gate: horizontal distance to the locked target must stay inside
     // the radius CONTINUOUSLY (get_wp_distance_to_destination is horizontal only)
-    const uint16_t radius_cm = cmd.content.aura_anchor.settle_radius_cm;
+    const uint16_t radius_cm = anchor.settle_radius_cm;
     if (radius_cm > 0) {
         if (wp_nav.get_wp_distance_to_destination() > (float)radius_cm) {
             anchor_settle_ms = 0;      // left the radius -> reset the counter
@@ -600,17 +630,44 @@ bool Sub::verify_anchor(const AP_Mission::Mission_Command& cmd)
         if (anchor_settle_ms == 0) {
             anchor_settle_ms = now;
         }
-        if (now - anchor_settle_ms < cmd.content.aura_anchor.settle_time_s * 1000UL) {
+        if (now - anchor_settle_ms < anchor.settle_time_s * 1000UL) {
             return false;
         }
     }
-
-    // 3) settled -> count the anchor duration
-    if (anchor_hold_ms == 0) {
-        anchor_hold_ms = now;
+    if (!anchor_settled) {
+        anchor_settled = true;
         gcs().send_text(MAV_SEVERITY_INFO, "Anchor: settled");
     }
-    if (now - anchor_hold_ms >= cmd.content.aura_anchor.duration_s * 1000UL) {
+
+    // 3) on station -> turn to the camera heading, then 4) let the swing die out.
+    // Same 2 deg tolerance as verify_yaw(); the guard above is the only timeout.
+    if (anchor_ready_ms == 0) {
+        if (anchor.yaw_valid &&
+            abs(wrap_180_cd(ahrs.yaw_sensor - yaw_look_at_heading)) > 200) {
+            return false;
+        }
+        anchor_ready_ms = now;
+    }
+    if (anchor.take_photo && now - anchor_ready_ms < anchor.photo_delay_s * 1000UL) {
+        return false;
+    }
+
+    // 4) shutter, exactly once. This is the same code path the DO_DIGICAM_CONTROL
+    // mission item took (AP_Mission::start_command_camera -> camera.take_picture),
+    // so CAM1_TYPE = MAVLink is still what makes the command reach the network.
+    if (anchor.take_photo && !anchor_photo_done) {
+        anchor_photo_done = true;
+#if AP_CAMERA_ENABLED
+        camera.take_picture();
+#endif
+        gcs().send_text(MAV_SEVERITY_INFO, "Anchor: photo");
+    }
+
+    // 5) everything done -> count the anchor duration
+    if (anchor_hold_ms == 0) {
+        anchor_hold_ms = now;
+    }
+    if (now - anchor_hold_ms >= anchor.duration_s * 1000UL) {
         gcs().send_text(MAV_SEVERITY_INFO, "Anchor released");
         return true;
     }
