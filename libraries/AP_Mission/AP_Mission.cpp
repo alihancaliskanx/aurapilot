@@ -1419,6 +1419,14 @@ MAV_MISSION_RESULT AP_Mission::mavlink_int_to_mission_cmd(const mavlink_mission_
         cmd.content.aura_anchor.settle_radius_cm = constrain_float(packet.param2 * 100.0f, 0, UINT16_MAX);
         cmd.content.aura_anchor.settle_time_s = constrain_float(packet.param3, 0, UINT16_MAX);
         cmd.content.aura_anchor.guard_time_s = constrain_float(packet.param4, 0, UINT16_MAX);
+        // The anchor has no Location, so x/y/z are free. x carries the camera heading
+        // in whole degrees with negative meaning "no turn" - the same convention the
+        // plan generators already use for a target's heading. y is the shutter flag,
+        // z the settle-on-heading wait before it fires.
+        cmd.content.aura_anchor.yaw_valid = (packet.x >= 0);
+        cmd.content.aura_anchor.yaw_deg = cmd.content.aura_anchor.yaw_valid ? (packet.x % 360) : 0;
+        cmd.content.aura_anchor.take_photo = (packet.y != 0);
+        cmd.content.aura_anchor.photo_delay_s = constrain_float(packet.z, 0, 31);
         break;
 
     case MAV_CMD_NAV_ATTITUDE_TIME:
@@ -1949,6 +1957,9 @@ bool AP_Mission::mission_cmd_to_mavlink_int(const AP_Mission::Mission_Command& c
         packet.param2 = cmd.content.aura_anchor.settle_radius_cm * 0.01f;
         packet.param3 = cmd.content.aura_anchor.settle_time_s;
         packet.param4 = cmd.content.aura_anchor.guard_time_s;
+        packet.x = cmd.content.aura_anchor.yaw_valid ? (int32_t)cmd.content.aura_anchor.yaw_deg : -1;
+        packet.y = cmd.content.aura_anchor.take_photo;
+        packet.z = cmd.content.aura_anchor.photo_delay_s;
         break;
 
     case MAV_CMD_NAV_ATTITUDE_TIME:

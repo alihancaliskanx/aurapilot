@@ -284,8 +284,11 @@ private:
     // AURA: drop anchor state
     uint32_t anchor_start_ms;   // when the command started (guard ceiling counts from here)
     uint32_t anchor_settle_ms;  // when it entered the settle radius uninterrupted (0 = outside)
-    uint32_t anchor_hold_ms;    // settled, anchor duration starts here (0 = not yet)
+    uint32_t anchor_ready_ms;   // on station and on heading, the pre-shutter wait starts here (0 = not yet)
+    uint32_t anchor_hold_ms;    // shutter done, anchor duration starts here (0 = not yet)
     bool anchor_skipped;        // could not anchor (no position source) -> skip the command
+    bool anchor_settled;        // the settle gate has been passed once (for the status text)
+    bool anchor_photo_done;     // the shutter has already fired for this anchor
 
     // Battery Sensors
     AP_BattMonitor battery{MASK_LOG_CURRENT,
