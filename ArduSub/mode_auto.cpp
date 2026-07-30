@@ -393,16 +393,36 @@ void ModeAuto::auto_loiter_run(bool honour_auto_yaw)
 //  Fails when there is no position source.
 bool ModeAuto::auto_anchor_start()
 {
+    // how far the locked point may sit from where the vehicle would coast to a stop
+    constexpr float ANCHOR_MAX_PULL_CM = 500.0f;
+
     if (!sub.position_ok()) {
         return false;
     }
 
     sub.auto_mode = Auto_Anchor;
 
-    // compute the stopping point and lock it in as the destination
+    // Lock the point the mission asked for, not the point the vehicle drifted to.
+    // get_wp_stopping_point() projects from the *measured* position, so whatever
+    // tracking error existed the instant the anchor dropped became permanent - and
+    // the settle gate cannot catch it, because it measures distance to the locked
+    // point rather than to the target. 30 Jul log_266 t=789.2: the surface waypoint
+    // was at N=-3.87, the anchor froze N=-4.21 and duly reported "settled" 34 cm off.
+    // Re-using the previous leg's destination closes that error instead of accepting
+    // it, and it is the right point at both call sites (the surface waypoint for a
+    // photo anchor, the dive-in-place waypoint for the departure anchor).
     Vector3f stopping_point;
     sub.wp_nav.get_wp_stopping_point(stopping_point);
-    sub.wp_nav.set_wp_destination(stopping_point);
+
+    const Vector3f target = sub.wp_nav.get_wp_destination();
+    // A terrain-frame destination is not re-usable: the anchor makes no rangefinder
+    // guarantee. And an anchor with no waypoint before it (first mission item, or
+    // stale wp_nav state) would otherwise send the vehicle off to whatever is left in
+    // _destination - the anchor is a stop, never a leg, so anything out of reach
+    // falls back to the stopping point.
+    const bool target_usable = !sub.wp_nav.origin_and_destination_are_terrain_alt() &&
+                               (target - stopping_point).length() < ANCHOR_MAX_PULL_CM;
+    sub.wp_nav.set_wp_destination(target_usable ? target : stopping_point);
 
     // Default to holding the current heading: without this the previous leg's
     // AUTO_YAW_LOOK_AT_NEXT_WP would survive and the vehicle would slew towards the
