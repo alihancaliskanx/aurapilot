@@ -217,15 +217,29 @@ public:
     // Declared as MAV_CMD_USER_1 (31010) on the wire; hasLocation=false, so the
     // content union is free and the command carries no Location (it anchors
     // wherever the vehicle happens to be).
-    // 16-bit id -> 10 bytes of payload in storage, this struct uses 8.
+    // 16-bit id -> 10 bytes of payload in storage, and this struct now uses all 10.
     static constexpr uint16_t MAV_CMD_AURA_ANCHOR = 31010;
 
     struct PACKED Aura_Anchor_Command {
-        uint16_t duration_s;       // anchor duration (s); counted once settled
+        uint16_t duration_s;       // anchor duration (s); counted once the sequence is done
         uint16_t settle_radius_cm; // settle radius (cm), 0 = settle gate disabled
         uint16_t settle_time_s;    // uninterrupted time to stay inside the radius (s)
-        uint16_t guard_time_s;     // overall ceiling (s), 0 = auto (duration*3 + 30)
+        uint16_t guard_time_s;     // overall ceiling (s), 0 = auto
+        // The camera work is folded into the anchor. It used to be spelled out in the
+        // mission as CONDITION_YAW + CONDITION_DELAY + DO_DIGICAM_CONTROL running as
+        // do-commands beside the anchor, which only fired if that queue happened to
+        // finish inside the hold (advance_current_nav_cmd drops a pending queue when
+        // the nav command completes). Inside the anchor the order is guaranteed:
+        // settle -> turn -> wait -> shutter -> hold.
+        // Old missions left these two bytes zero, which reads back as "no turn, no
+        // photo" - the pre-fold behaviour - so stored plans stay valid.
+        uint16_t yaw_deg : 9;       // camera heading 0..359 (only when yaw_valid)
+        uint16_t yaw_valid : 1;     // 0 = keep the current heading, no turn
+        uint16_t take_photo : 1;    // 1 = fire the shutter once on station and on heading
+        uint16_t photo_delay_s : 5; // settle-on-heading wait before the shutter (0..31 s)
     };
+    static_assert(sizeof(Aura_Anchor_Command) == 10,
+                  "Aura_Anchor_Command must fit the 10-byte content block of a 16-bit-id command");
 
     // winch command structure
     struct PACKED Winch_Command {
