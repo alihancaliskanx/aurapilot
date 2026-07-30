@@ -338,7 +338,9 @@ private:
     void auto_wp_run();
     void auto_circle_run();
     void auto_nav_guided_run();
-    void auto_loiter_run();
+    // AURA: honour_auto_yaw=true lets auto_yaw_mode drive the heading (CONDITION_YAW,
+    // ROI); false keeps the stock behaviour where yaw is the pilot's rate stick only.
+    void auto_loiter_run(bool honour_auto_yaw = false);
     void auto_terrain_recover_run();
     void auto_anchor_run();
 };
