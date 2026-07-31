@@ -418,7 +418,17 @@ bool ModeAuto::auto_anchor_start()
     // stale wp_nav state) would otherwise send the vehicle off to whatever is left in
     // _destination - the anchor is a stop, never a leg, so anything out of reach
     // falls back to the stopping point.
-    const bool target_usable = !sub.wp_nav.origin_and_destination_are_terrain_alt() &&
+    // reached_wp_destination() is the load-bearing one here. Re-using the previous
+    // target only closes a small tracking error while that target was actually
+    // reached: set_wp_destination() then leaves origin == destination and nothing
+    // moves. If the waypoint gave up on its guard instead, _flags.reached_destination
+    // is false, set_wp_destination() runs wp_and_spline_init() (AC_WPNav.cpp:294) and
+    // the anchor turns into a real shaped leg of up to ANCHOR_MAX_PULL_CM - flown at
+    // the surface, because aura_satih_tavani_uygula opens the ceiling to the anchor's
+    // own -0.1 m target. Travelling at the surface is the one thing this pattern never
+    // does, and a waypoint the vehicle could not reach is exactly where it must stop.
+    const bool target_usable = sub.wp_nav.reached_wp_destination() &&
+                               !sub.wp_nav.origin_and_destination_are_terrain_alt() &&
                                (target - stopping_point).length() < ANCHOR_MAX_PULL_CM;
     sub.wp_nav.set_wp_destination(target_usable ? target : stopping_point);
 
