@@ -284,6 +284,11 @@ private:
     bool anchor_skipped;        // could not anchor (no position source) -> skip the command
     bool anchor_settled;        // the settle gate has been passed once (for the status text)
     bool anchor_photo_done;     // the shutter has already fired for this anchor
+    // Which mission item that shutter belonged to. Survives do_anchor() so that
+    // re-entering AUTO on the same anchor does not take a second frame of the same
+    // target - see do_anchor(). Zero means "nothing shot yet": index 0 is always the
+    // mission settings / home item, so it can never be an anchor.
+    uint16_t anchor_photo_cmd_index = AP_MISSION_CMD_INDEX_NONE;
 
     // Battery Sensors
     AP_BattMonitor battery{MASK_LOG_CURRENT,
