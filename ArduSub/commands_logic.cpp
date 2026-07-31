@@ -421,7 +421,18 @@ void Sub::do_anchor(const AP_Mission::Mission_Command& cmd)
     anchor_hold_ms = 0;
     anchor_skipped = false;
     anchor_settled = false;
-    anchor_photo_done = false;
+
+    // Everything above restarts, but the shutter must not. Leaving AUTO and coming
+    // back re-runs the current NAV command (AP_Mission::resume -> set_current_cmd ->
+    // start_command), so a plain reset here fired a second frame of the same target:
+    // measured in SITL, a two-photo plan produced three files and the wpNNN -> target
+    // mapping in gorev_eslesme.csv stopped being one-to-one. Only clear the flag when
+    // this is a different anchor than the one already photographed.
+    // (A mission that DO_JUMPs back to the same index on purpose would be treated as
+    // already shot; no generator emits one.)
+    if (cmd.index != anchor_photo_cmd_index) {
+        anchor_photo_done = false;
+    }
 
     if (!mode_auto.auto_anchor_start()) {
         // no position source (DVL/UGPS/EKF) -> cannot anchor.
@@ -630,28 +641,53 @@ bool Sub::verify_anchor(const AP_Mission::Mission_Command& cmd)
     const uint32_t now = AP_HAL::millis();
 
     // 1) guard ceiling - guarantees the mission advances under any condition
+    // The settle gate is the first thing that has to pass and it wants an
+    // UNINTERRUPTED settle_time, so it belongs in the budget. Leaving it out meant a
+    // long settle could not fit under its own ceiling: with the default start anchor
+    // (duration 0, no photo, no turn) the budget is 30 s, so an anchorSettle of 30 s
+    // or more made the command mathematically unable to finish - it always ended on
+    // "guard time expired" and silently degraded to a plain wait.
     uint32_t guard_ms = anchor.guard_time_s * 1000UL;
     if (guard_ms == 0) {
-        // Auto ceiling. The turn and the pre-shutter wait now happen inside the
-        // anchor, so they have to be part of the budget: a plain duration*3 + 30
-        // could expire mid-turn and the shutter would never fire.
-        guard_ms = (anchor.duration_s + anchor.photo_delay_s) * 3000UL + 30000UL;
+        // Auto ceiling. The turn and the pre-shutter wait happen inside the anchor,
+        // so they are part of the budget: a plain duration*3 + 30 could expire
+        // mid-turn and the shutter would never fire.
+        guard_ms = (anchor.duration_s + anchor.photo_delay_s + anchor.settle_time_s) * 3000UL
+                   + 30000UL;
         if (anchor.yaw_valid) {
             // a 180 deg turn at the default slew rate takes the better part of 20 s
             guard_ms += 30000UL;
         }
+    } else {
+        // An operator-supplied ceiling is not validated anywhere else. Below the sum
+        // of the stages it can never be met: guard 2 s with settle 3 s was measured
+        // in SITL to skip "Anchor: settled" entirely and go straight to an off-aim
+        // frame. Keep the operator's value as a floor-checked ceiling instead.
+        const uint32_t asgari = (anchor.duration_s + anchor.photo_delay_s +
+                                 anchor.settle_time_s) * 1000UL + 5000UL;
+        guard_ms = MAX(guard_ms, asgari);
     }
     if (now - anchor_start_ms >= guard_ms) {
         // Last resort: the heading gate below is enforced continuously, so a vehicle
         // that can never hold the aim would otherwise reach this point having taken
         // no photo at all. A frame off-aim still beats an empty slot in the survey,
         // and the distinct text says which one it was.
-        if (anchor.take_photo && !anchor_photo_done) {
+        // Only while armed. In AUTO the mission runs regardless of arm state
+        // (ModeAuto::run calls mission.update() unconditionally) and a disarmed
+        // vehicle cannot turn, so the heading gate never opens and this branch used
+        // to fire at every anchor - a disarmed sub sitting in AUTO quietly worked its
+        // way through the whole mission taking garbage frames.
+        if (anchor.take_photo && !anchor_photo_done && motors.armed()) {
             anchor_photo_done = true;
+            anchor_photo_cmd_index = cmd.index;
 #if AP_CAMERA_ENABLED
-            camera.take_picture();
+            const bool cekildi = camera.take_picture();
+#else
+            const bool cekildi = false;
 #endif
-            gcs().send_text(MAV_SEVERITY_WARNING, "Anchor: photo off-aim (guard)");
+            gcs().send_text(cekildi ? MAV_SEVERITY_WARNING : MAV_SEVERITY_ERROR,
+                            cekildi ? "Anchor: photo off-aim (guard)"
+                                    : "Anchor: PHOTO FAILED (guard)");
         }
         gcs().send_text(MAV_SEVERITY_WARNING, "Anchor: guard time expired");
         return true;
@@ -663,6 +699,12 @@ bool Sub::verify_anchor(const AP_Mission::Mission_Command& cmd)
     if (radius_cm > 0) {
         if (wp_nav.get_wp_distance_to_destination() > (float)radius_cm) {
             anchor_settle_ms = 0;      // left the radius -> reset the counter
+            // The pre-shutter wait has to restart too. Without this, drifting out
+            // and back in "paid" for the swing-settling time with time spent outside
+            // the radius: the shutter fired the instant the vehicle re-settled.
+            if (anchor.take_photo && !anchor_photo_done) {
+                anchor_ready_ms = 0;
+            }
             return false;
         }
         if (anchor_settle_ms == 0) {
@@ -671,10 +713,30 @@ bool Sub::verify_anchor(const AP_Mission::Mission_Command& cmd)
         if (now - anchor_settle_ms < anchor.settle_time_s * 1000UL) {
             return false;
         }
+    } else if (anchor_settle_ms == 0) {
+        // Gate disabled. settle_time still has to mean something, otherwise a
+        // radius of 0 collapsed the whole command: with duration 0 the anchor
+        // finished in a single 400 Hz tick while still printing "settled", so a
+        // departure gate could vanish and the log read as if it had worked.
+        anchor_settle_ms = now;
+    }
+    if (radius_cm == 0 && now - anchor_settle_ms < anchor.settle_time_s * 1000UL) {
+        return false;
     }
     if (!anchor_settled) {
         anchor_settled = true;
-        gcs().send_text(MAV_SEVERITY_INFO, "Anchor: settled");
+        gcs().send_text(MAV_SEVERITY_INFO,
+                        radius_cm > 0 ? "Anchor: settled" : "Anchor: waited (no gate)");
+    }
+
+    // The heading was set once in do_anchor() and only read from here on, so anything
+    // that overwrote auto_yaw_mode in between - a DO_SET_ROI in the same mission, an
+    // operator CONDITION_YAW from the GCS, a CONDITION_YAW queued just before this
+    // anchor - left the gate measuring a target the controller was no longer flying,
+    // which locks it until the guard fires. verify_yaw() re-asserts for exactly this
+    // reason; do it here too, value included.
+    if (anchor.yaw_valid && auto_yaw_mode != AUTO_YAW_LOOK_AT_HEADING) {
+        mode_auto.set_auto_yaw_look_at_heading(anchor.yaw_deg, 0.0f, 0, 0);
     }
 
     // 3) on station -> turn to the camera heading, then 4) let the swing die out.
@@ -697,7 +759,15 @@ bool Sub::verify_anchor(const AP_Mission::Mission_Command& cmd)
     if (anchor_ready_ms == 0) {
         anchor_ready_ms = now;
     }
-    if (anchor.take_photo && now - anchor_ready_ms < anchor.photo_delay_s * 1000UL) {
+    // A turn always needs a moment to stop swinging, even when photo_delay is 0:
+    // with 0 the shutter fired on the very tick the nose first crossed into the
+    // window, i.e. at maximum angular rate, right before the overshoot. mavui lets
+    // the operator set photoBefore to 0, so this is reachable from the UI.
+    uint32_t bekleme_ms = anchor.photo_delay_s * 1000UL;
+    if (anchor.yaw_valid) {
+        bekleme_ms = MAX(bekleme_ms, 1000UL);
+    }
+    if (anchor.take_photo && now - anchor_ready_ms < bekleme_ms) {
         return false;
     }
 
@@ -706,10 +776,20 @@ bool Sub::verify_anchor(const AP_Mission::Mission_Command& cmd)
     // so CAM1_TYPE = MAVLink is still what makes the command reach the network.
     if (anchor.take_photo && !anchor_photo_done) {
         anchor_photo_done = true;
+        anchor_photo_cmd_index = cmd.index;
 #if AP_CAMERA_ENABLED
-        camera.take_picture();
+        // The return value matters: take_picture() fails when no camera backend
+        // exists (CAM1_TYPE = 0, or the parameter was changed without a reboot -
+        // AP_Camera::init only runs at boot and the parameter carries no
+        // @RebootRequired). Announcing "Anchor: photo" regardless meant the mission
+        // reported success while nothing reached the network - confirmed in SITL
+        // with CAM1_TYPE=0: four anchors, four "Anchor: photo", zero 203 on the wire.
+        const bool cekildi = camera.take_picture();
+#else
+        const bool cekildi = false;
 #endif
-        gcs().send_text(MAV_SEVERITY_INFO, "Anchor: photo");
+        gcs().send_text(cekildi ? MAV_SEVERITY_INFO : MAV_SEVERITY_ERROR,
+                        cekildi ? "Anchor: photo" : "Anchor: PHOTO FAILED (no camera)");
     }
 
     // 5) everything done -> count the anchor duration

@@ -1968,6 +1968,15 @@ bool AP_Mission::mission_cmd_to_mavlink_int(const AP_Mission::Mission_Command& c
         packet.x = cmd.content.aura_anchor.yaw_valid ? (int32_t)cmd.content.aura_anchor.yaw_deg : -1;
         packet.y = cmd.content.aura_anchor.take_photo;
         packet.z = cmd.content.aura_anchor.photo_delay_s;
+        // x/y carry a heading and a flag, not a scaled coordinate. Without saying so,
+        // the frame stays at the 0 (MAV_FRAME_GLOBAL) set at the top of this function
+        // - stored_in_location() does not list the anchor - and every GCS then reads
+        // x/y as 1e7-scaled degrees. QGC divides on download and multiplies on upload,
+        // and the int32 truncation in between loses a degree: 90 of the 360 possible
+        // headings shift by 1 on every round trip and it accumulates (52 -> 51 -> 50).
+        // It also makes the heading show up as 9.1e-06 in the plan file and as "0" in
+        // the item editor, where touching the field turns it into a real due north.
+        packet.frame = MAV_FRAME_MISSION;
         break;
 
     case MAV_CMD_NAV_ATTITUDE_TIME:
