@@ -1,12 +1,63 @@
+# AURA fork'u
+
+Bu depo [ArduPilot/ardupilot](https://github.com/ArduPilot/ardupilot) fork'udur.
+`master` dalı = upstream `master` + AURA AUV'a özgü commit'ler: ArduSub görev
+mantığı (`ArduSub/commands_logic.cpp`, `mode_auto.cpp`, `mode_guided.cpp`), SITL
+frame'i ve gerçek araç parametreleri (`Tools/autotest/default_params/sub-aura*`,
+kök dizindeki `*.params`).
+
+## Upstream'den güncelleme çekmek
+
+Kendi commit'lerimiz **rebase ile** upstream'in tepesinde tutulur, böylece "hangisi
+bizim" sorusu geçmişe bakınca tek blok halinde görünür.
+
+```bash
+# tek seferlik: upstream remote'u ve tekrarlayan çakışma hafızası
+git remote add upstream https://github.com/ArduPilot/ardupilot.git
+git config rerere.enabled true
+
+# her güncellemede
+git stash -u                      # çalışan değişiklikler varsa, kirli ağaçla rebase olmaz
+git fetch origin                  # fork'un GitHub'daki hali yerelden ileride olabilir
+git fetch upstream master
+git rebase upstream/master
+git submodule update --init --recursive
+git push --force-with-lease origin master
+git stash pop
+```
+
+Dikkat edilecekler:
+
+- **Önce `git fetch origin`.** Yerel klon kendi fork'undan geride olabilir; bunu
+  atlayıp force-push edersen GitHub'daki commit'ler silinir.
+- **`--force-with-lease`.** Rebase geçmişi yeniden yazdığı için normal push
+  reddedilir. "stale info" hatası alırsan bir `git fetch origin` çekip tekrar dene.
+- **Submodule'ler.** 15 tanesi var; güncellemeden sonra senkronlamazsan derleme
+  kırılır. Toplu senkron için `Tools/gittools/submodule-sync.sh` de kullanılabilir.
+- **Build cache'i.** Yüzlerce commit ilerledikten sonra `./waf distclean` ve
+  yeniden `./waf configure --board <board>` gerekir.
+- **Çakışma çıkarsa** dosyayı düzelt, `git add`, `git rebase --continue`;
+  vazgeçmek için `git rebase --abort`. `pre-rebase-backup` gibi bir dal açmak
+  ucuz sigortadır.
+
+Rebase yerine `git merge upstream/master` de kullanılabilir — geçmişi yeniden
+yazmaz, force-push gerektirmez; karşılığında merge commit'leri ve bizim
+commit'lerimizin upstream'inkilerle iç içe geçmesi.
+
+Aşağıdaki rozetler **upstream ArduPilot'un** CI durumunu gösterir, bu fork'unkini
+değil.
+
+---
+
 # ArduPilot Project
 
 [![Discord](https://img.shields.io/discord/674039678562861068.svg)](https://ardupilot.org/discord)
 
-[![Test Copter](https://github.com/ArduPilot/ardupilot/workflows/test%20copter/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_sitl_copter.yml) [![Test Plane](https://github.com/ArduPilot/ardupilot/workflows/test%20plane/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_sitl_plane.yml) [![Test Rover](https://github.com/ArduPilot/ardupilot/workflows/test%20rover/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_sitl_rover.yml) [![Test Sub](https://github.com/ArduPilot/ardupilot/workflows/test%20sub/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_sitl_sub.yml) [![Test Tracker](https://github.com/ArduPilot/ardupilot/workflows/test%20tracker/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_sitl_tracker.yml)
+[![Test Copter](https://github.com/ArduPilot/ardupilot/actions/workflows/test_sitl_copter.yml/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_sitl_copter.yml) [![Test Plane](https://github.com/ArduPilot/ardupilot/actions/workflows/test_sitl_plane.yml/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_sitl_plane.yml) [![Test Rover](https://github.com/ArduPilot/ardupilot/actions/workflows/test_sitl_rover.yml/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_sitl_rover.yml) [![Test Sub](https://github.com/ArduPilot/ardupilot/actions/workflows/test_sitl_sub.yml/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_sitl_sub.yml) [![Test Tracker](https://github.com/ArduPilot/ardupilot/actions/workflows/test_sitl_tracker.yml/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_sitl_tracker.yml)
 
-[![Test AP_Periph](https://github.com/ArduPilot/ardupilot/workflows/test%20ap_periph/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_sitl_periph.yml) [![Test Chibios](https://github.com/ArduPilot/ardupilot/workflows/test%20chibios/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_chibios.yml) [![Test Linux SBC](https://github.com/ArduPilot/ardupilot/workflows/test%20Linux%20SBC/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_linux_sbc.yml) [![Test Replay](https://github.com/ArduPilot/ardupilot/workflows/test%20replay/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_replay.yml)
+[![Test AP_Periph](https://github.com/ArduPilot/ardupilot/actions/workflows/test_sitl_periph.yml/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_sitl_periph.yml) [![Test Chibios](https://github.com/ArduPilot/ardupilot/actions/workflows/test_chibios.yml/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_chibios.yml) [![Test Linux SBC](https://github.com/ArduPilot/ardupilot/actions/workflows/test_linux_sbc.yml/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_linux_sbc.yml) [![Test Replay](https://github.com/ArduPilot/ardupilot/actions/workflows/test_replay.yml/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_replay.yml)
 
-[![Test Unit Tests](https://github.com/ArduPilot/ardupilot/workflows/test%20unit%20tests%20and%20sitl%20building/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_unit_tests.yml)[![test size](https://github.com/ArduPilot/ardupilot/actions/workflows/test_size.yml/badge.svg)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_size.yml)
+[![Test Unit Tests](https://github.com/ArduPilot/ardupilot/actions/workflows/test_unit_tests.yml/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_unit_tests.yml)[![test size](https://github.com/ArduPilot/ardupilot/actions/workflows/test_size.yml/badge.svg)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_size.yml)
 
 [![Test Environment Setup](https://github.com/ArduPilot/ardupilot/actions/workflows/test_environment.yml/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_environment.yml)
 
