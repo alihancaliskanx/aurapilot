@@ -20,20 +20,30 @@
 // suyun disinda olur.) Istisna yalnizca terrain-frame OLMAYAN bacaklar icin:
 // terrain bacaginda hedef z tabandan olcudur, satih tavaniyla kiyaslanamaz.
 //
-// 4.5.3'te terrain ofseti wp_nav tarafindan pos_target'a dahil edildiginden
-// clamp dogrudan hedefe uygulanir; her dongude yeniden hesaplanir
-// (rangefinder/terrain degisimini izler). (master 6621332'nin 4.5.3 portu;
-// desired/target ayrimi 4.5'te yok, get/set_pos_target_z_cm kullanilir.)
+// 4.5'teki get/set_pos_target_z_cm ikilisi 4.7'de yok: nihai hedef yalniz
+// D_update_controller() icinde kuruluyor (AC_PosControl.cpp:1094,
+// _pos_target = desired + offset + terrain) ve disariya sadece desired yazilabilir.
+// DIKKAT: bu fonksiyon update_wpnav() ile D_update_controller() ARASINDA calisir,
+// yani get_pos_target_NED_m() bir dongu BAYAT deger dondurur. Bayat hedeften
+// "fark" cikarmak periyot-2 salinim uretir (tavan bir dongu tutar, bir dongu
+// kacar; sig suda ortalama hedef satihin ustunde kalir ve tavan tamamen bosa
+// duser). Bu yuzden bu dongunun hedefi yerel hesaplanir ve desired MUTLAK
+// yazilir -> islem idempotent, her dongude yeniden degerlendirilir
+// (rangefinder/terrain degisimini izler). Birimler metre, U = yukari pozitif.
 static void aura_satih_tavani_uygula(AC_PosControl *position_control, const AC_WPNav &wp_nav)
 {
-    constexpr float SATIH_TAVANI_Z_CM = -30.0f;   // NEU z (yukari, cm; 0 = satih)
-    float tavan_z_cm = SATIH_TAVANI_Z_CM;
+    constexpr float SATIH_TAVANI_U_M = -0.30f;   // U (yukari, m; 0 = satih)
+    float tavan_u_m = SATIH_TAVANI_U_M;
     if (!wp_nav.origin_and_destination_are_terrain_alt()) {
         // komut edilen hedef daha sigsa (satha cikis WP'si) tavani ona ac
-        tavan_z_cm = MAX(tavan_z_cm, wp_nav.get_wp_destination().z);
+        tavan_u_m = MAX(tavan_u_m, wp_nav.get_wp_destination_NEU_cm().z * 0.01f);
     }
-    if (position_control->get_pos_target_z_cm() > tavan_z_cm) {
-        position_control->set_pos_target_z_cm(tavan_z_cm);
+    // hedef_u = desired_u + ofset_u ; ofset_u = -(pos_offset_D + pos_terrain_D)
+    const float ofset_u_m = -(float)(position_control->get_pos_offset_NED_m().z
+                                     + position_control->get_pos_terrain_D_m());
+    const float hedef_u_m = position_control->get_pos_desired_U_m() + ofset_u_m;
+    if (hedef_u_m > tavan_u_m) {
+        position_control->set_pos_desired_U_m(tavan_u_m - ofset_u_m);
     }
 }
 bool ModeAuto::init(bool ignore_checks) {
@@ -403,7 +413,7 @@ bool ModeAuto::auto_anchor_start()
     sub.auto_mode = Auto_Anchor;
 
     // Lock the point the mission asked for, not the point the vehicle drifted to.
-    // get_wp_stopping_point() projects from the *measured* position, so whatever
+    // get_wp_stopping_point_NEU_cm() projects from the *measured* position, so whatever
     // tracking error existed the instant the anchor dropped became permanent - and
     // the settle gate cannot catch it, because it measures distance to the locked
     // point rather than to the target. 30 Jul log_266 t=789.2: the surface waypoint
@@ -412,9 +422,9 @@ bool ModeAuto::auto_anchor_start()
     // it, and it is the right point at both call sites (the surface waypoint for a
     // photo anchor, the dive-in-place waypoint for the departure anchor).
     Vector3f stopping_point;
-    sub.wp_nav.get_wp_stopping_point(stopping_point);
+    sub.wp_nav.get_wp_stopping_point_NEU_cm(stopping_point);
 
-    const Vector3f target = sub.wp_nav.get_wp_destination();
+    const Vector3f target = sub.wp_nav.get_wp_destination_NEU_cm();
     // A terrain-frame destination is not re-usable: the anchor makes no rangefinder
     // guarantee. And an anchor with no waypoint before it (first mission item, or
     // stale wp_nav state) would otherwise send the vehicle off to whatever is left in
@@ -422,9 +432,9 @@ bool ModeAuto::auto_anchor_start()
     // falls back to the stopping point.
     // reached_wp_destination() is the load-bearing one here. Re-using the previous
     // target only closes a small tracking error while that target was actually
-    // reached: set_wp_destination() then leaves origin == destination and nothing
+    // reached: set_wp_destination_NEU_cm() then leaves origin == destination and nothing
     // moves. If the waypoint gave up on its guard instead, _flags.reached_destination
-    // is false, set_wp_destination() runs wp_and_spline_init() (AC_WPNav.cpp:294) and
+    // is false, set_wp_destination_NEU_cm() runs wp_and_spline_init_m() and
     // the anchor turns into a real shaped leg of up to ANCHOR_MAX_PULL_CM - flown at
     // the surface, because aura_satih_tavani_uygula opens the ceiling to the anchor's
     // own -0.1 m target. Travelling at the surface is the one thing this pattern never
@@ -432,7 +442,7 @@ bool ModeAuto::auto_anchor_start()
     const bool target_usable = sub.wp_nav.reached_wp_destination() &&
                                !sub.wp_nav.origin_and_destination_are_terrain_alt() &&
                                (target - stopping_point).length() < ANCHOR_MAX_PULL_CM;
-    sub.wp_nav.set_wp_destination(target_usable ? target : stopping_point);
+    sub.wp_nav.set_wp_destination_NEU_cm(target_usable ? target : stopping_point);
 
     // Default to holding the current heading: without this the previous leg's
     // AUTO_YAW_LOOK_AT_NEXT_WP would survive and the vehicle would slew towards the
