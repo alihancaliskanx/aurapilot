@@ -863,6 +863,13 @@ void Sub::load_parameters()
     // upgrade attitude controller parameters
     sub.attitude_control.convert_parameters();
 
+    // AURA: upgrade position controller parameters (PSC_VELZ_*/ACCZ_*/VELXY_* ->
+    // PSC_D_VEL_*/D_ACC_*/NE_VEL_*).  Upstream defines AC_PosControl::convert_parameters()
+    // and ArduCopter calls it (ArduCopter/system.cpp), but ArduSub never did -- so a
+    // vehicle flashed in place from 4.5.3 silently loses its velocity/accel loop tuning
+    // and falls back to Sub factory defaults (e.g. PSC_VELXY_I 0.02 -> 0.5, a 25x change).
+    sub.pos_control.convert_parameters();
+
     // upgrade waypoint navigation parameters
     wp_nav.convert_parameters();
 
