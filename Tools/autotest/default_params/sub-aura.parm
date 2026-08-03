@@ -201,7 +201,11 @@ BTN8_FUNCTION          48
 BTN8_SFUNCTION         0
 BTN9_FUNCTION          23
 BTN9_SFUNCTION         27
-CAM1_TYPE              0
+# CLAUDE.md §4: 5 = MAVLink. Otopilot DO_DIGICAM_CONTROL'u (203) MAVLink agina
+# yayinsin diye SART; 0'da komut aga hic dusmez ve foto sistemi sessizce olur.
+# DIKKAT: gercek arac dokumunde (Submarine-4.5.3-STABLE-20260714) bu deger 0 --
+# yani arac 14 Tem itibariyle YANLIS ayardaydi. Ilk firsatta araçta dogrula.
+CAM1_TYPE              5
 CAM2_TYPE              0
 CAM_AUTO_ONLY          0
 CAM_MAX_ROLL           0
@@ -1007,6 +1011,12 @@ TEMP2_TYPE             0
 TEMP3_TYPE             0
 TEMP_LOG               0
 TERRAIN_ENABLE         0
+# 4.7'de YENI arm kapisi (AP_Arming_Sub.cpp:80): RC_OPTIONS bit5 + Check::RC acikken
+# RC3, RC3_TRIM +/- RC3_DZ disindaysa arm reddedilir ("Throttle not centered").
+# Bu dosyada uc kosul da sagliniyor: RC_OPTIONS=32, ARMING_SKIPCHK RC'yi atlamiyor,
+# RC3_TRIM=1100 / RC3_DZ=30 -> pencere [1070,1130]. Varsayilan THR_ARM_POS=1 ile
+# joystick'siz (GCS'siz otonom) arm engellenir; 4.5.3'te boyle bir kapi yoktu.
+THR_ARM_POS            0
 THR_DZ                 100
 VISO_DELAY_MS          10
 VISO_ORIENT            0
