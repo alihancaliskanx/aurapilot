@@ -265,8 +265,8 @@ void Sub::do_nav_wp(const AP_Mission::Mission_Command& cmd)
     // minute; the legs that behave use a small fraction of that (the 14.6 m cruise
     // leg in the same mission took 56 s against a ~140 s budget).
     nav_wp_start_ms = AP_HAL::millis();
-    const float leg_cm = (wp_nav.get_wp_destination() - wp_nav.get_wp_origin()).length();
-    const float speed_cms = MAX(wp_nav.get_default_speed_xy(), 10.0f);
+    const float leg_cm = (wp_nav.get_wp_destination_NEU_cm() - wp_nav.get_wp_origin_NEU_cm()).length();
+    const float speed_cms = MAX(wp_nav.get_default_speed_NE_cms(), 10.0f);
     nav_wp_guard_ms = MAX((uint32_t)(3000.0f * leg_cm / speed_cms)
                           + loiter_time_max * 1000UL + 30000UL,
                           60000UL);
@@ -482,7 +482,7 @@ bool Sub::verify_nav_wp(const AP_Mission::Mission_Command& cmd)
     if (nav_wp_guard_ms != 0 && AP_HAL::millis() - nav_wp_start_ms >= nav_wp_guard_ms) {
         gcs().send_text(MAV_SEVERITY_WARNING, "WP #%i: guard time expired, %.2fm short",
                         cmd.index,
-                        (double)(wp_nav.get_wp_distance_to_destination() * 0.01f));
+                        (double)(wp_nav.get_wp_distance_to_destination_cm() * 0.01f));
         return true;
     }
 
@@ -697,7 +697,7 @@ bool Sub::verify_anchor(const AP_Mission::Mission_Command& cmd)
     // the radius CONTINUOUSLY (get_wp_distance_to_destination is horizontal only)
     const uint16_t radius_cm = anchor.settle_radius_cm;
     if (radius_cm > 0) {
-        if (wp_nav.get_wp_distance_to_destination() > (float)radius_cm) {
+        if (wp_nav.get_wp_distance_to_destination_cm() > (float)radius_cm) {
             anchor_settle_ms = 0;      // left the radius -> reset the counter
             // The pre-shutter wait has to restart too. Without this, drifting out
             // and back in "paid" for the swing-settling time with time spent outside
