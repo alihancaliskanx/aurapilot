@@ -815,7 +815,12 @@ void Sub::do_wait_delay(const AP_Mission::Mission_Command& cmd)
 
 void Sub::do_within_distance(const AP_Mission::Mission_Command& cmd)
 {
-    condition_value  = cmd.content.distance.meters;
+    // AURA: keep condition_value in centimetres.  verify_within_distance() compares it
+    // against get_wp_distance_to_destination_cm(), so upstream dropping the *100 during
+    // the 4.7 unit rework (4.5.3 had "meters * 100") made every threshold 100x too small
+    // -- CONDITION_DISTANCE 5 became "5 cm to go", which never satisfies and hangs the
+    // mission on that item.  condition_value is int32_t, so cm also keeps sub-metre precision.
+    condition_value  = cmd.content.distance.meters * 100;
 }
 
 void Sub::do_yaw(const AP_Mission::Mission_Command& cmd)
