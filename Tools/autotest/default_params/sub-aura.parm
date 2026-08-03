@@ -21,8 +21,12 @@ AHRS_WIND_MAX          0
 AHRS_YAW_P             0.2
 ATC_ANGLE_MAX          45
 ARMING_ACCTHRESH       0.75
-# TODO 4.7: ARMING_SKIPCHK ters maske - operator onayi bekliyor
-#ARMING_CHECK           448
+# 4.7: ARMING_CHECK -> ARMING_SKIPCHK, anlam TERS (yapilacak degil ATLANACAK kontroller).
+# Eski deger 448 = bit 6,7,8 (RC Channels, Board voltage, Battery Level) = yalniz bunlar calisir.
+# Karsiligi upstream'in kendi donusum formuluyle hesaplandi (AP_Arming.cpp:246,
+# maske = ((1<<21)-1) & ~1): (~448) & 2097150 = 2096702. Gercek arac 4.5.3'ten
+# flash'lanip otomatik donustugunde de tam bu deger olusur.
+ARMING_SKIPCHK         2096702
 ARMING_MAGTHRESH       100
 ARMING_MIS_ITEMS       0
 ARMING_OPTIONS         0
