@@ -759,7 +759,19 @@ RC3_DZ                 30
 RC3_MAX                1900
 RC3_MIN                1100
 RC3_REVERSED           0
-RC3_TRIM               1100
+# 4.7'de MANUAL'in gaz satiri degisti (ArduSub/mode_manual.cpp):
+#   4.5.3:  set_throttle(norm_input())
+#   4.7  :  set_throttle((norm_input() + 1) / 2)
+# norm_input() sifir noktasi olarak RC3_TRIM'i kullanir ve TRIM==MIN iken (RC_Channel.cpp,
+# "radio_min >= radio_trim -> return 0") ASLA negatif donmez. Bu yuzden:
+#   4.5.3 + TRIM=1100 -> itki -1..+1  DOGRU        (eski ayar, bilincliydi)
+#   4.5.3 + TRIM=1500 -> notrde -1.00 (tam asagi)  BOZUK  <- eskiden bu denenip geri alinmisti
+#   4.7   + TRIM=1100 -> gaz kolu fiilen OLU       BOZUK
+#   4.7   + TRIM=1500 -> itki -1..+1  DOGRU        <- 4.7 icin gecerli olan
+# SITL olcumu (4.7, ayni arac, tek fark TRIM): dikey hiz araligi 0.04 m/s -> 1.13 m/s.
+# DIKKAT: araca 4.5.3 geri yuklenirse bu deger 1100'e DONMELI, yoksa MANUAL bozulur.
+# ALT_HOLD/POSHOLD etkilenmez: onlar get_control_mid() kullanir, o da (MIN+MAX)/2'dir.
+RC3_TRIM               1500
 RC4_DZ                 40
 RC4_MAX                1900
 RC4_MIN                1100
