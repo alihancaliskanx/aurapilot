@@ -7,9 +7,14 @@
 # "tum zorunlu-olmayan mevcut ve gelecek kontrolleri atla").
 ARMING_SKIPCHK   -1       # gercek arac 448; RC-channels on-kosulu SITL'de joystick arm'i engeller
 RC_OPTIONS       0        # gercek=32 (strict-RC biti); duz RC-override yolu
-RC3_TRIM         1100     # gercek arac ile AYNI (26 Tem simde dogrulandi; docker/verify_sitl.py de 1100 varsayar).
-                          # Eski 1500 denemesi geri alindi: dikey notru 1500'e almak MANUAL'de stick
-                          # merkezdeyken kalici asagi/yukari itki birakiyordu.
+RC3_TRIM         1500     # gercek arac ile AYNI (sub-aura.parm'daki gerekce blokuna bak).
+                          # 26 Tem'de 1100'du ve o zaman DOGRUYDU: 4.5.3'te MANUAL
+                          # set_throttle(norm_input()) yapiyordu. 4.7 bunu
+                          # set_throttle((norm_input()+1)/2) olarak degistirdi; TRIM==MIN iken
+                          # norm_input() negatif donmedigi icin gaz kolu olu kaldi (SITL: dikey
+                          # hiz araligi 0.04 m/s). 1500 ile simetrik -1..+1 geri geldi (1.13 m/s).
+                          # "Eski 1500 denemesi kalici itki birakiyordu" notu 4.5.3'e aitti,
+                          # 4.7'de gecersiz -- iki surumde DOGRU DEGER TERS.
 
 # ===== Motor yonleri: sim BlueROV2-Heavy geometrisi -> ArduSub VARSAYILANI (+1) =====
 # (Gercek aracin MOT_x_DIRECTION kalibrasyonu sim geometrisine UYMAZ; "ileri" komutu yana surer.
@@ -117,3 +122,26 @@ INS_ACC3OFFS_Z   0
 AHRS_TRIM_X      0
 AHRS_TRIM_Y      0
 RNGFND1_TYPE     0
+
+# --- YAW SONUMU (YALNIZ SITL — gercek arac tuning'i sub-aura.parm'da DEGISMEDI) ---
+# Sim'de arac otelenirken burnu +/-13 deg salinip duruyordu: yaw hiz dongusunde D terimi
+# YOK (ATC_RAT_YAW_D=0), yani otelenmenin urettigi yaw momenti sonumlenmiyor. Arac
+# DURURKEN salinim yok (POSHOLD'da 20 sn'de 0.1 deg), akinti da sebep degil (kapatinca
+# 24.6 vs 26.0 deg -> fark yok). Olcum (8 m otelenme, komut -90 deg, ort/max sapma):
+# ONEMLI: kararsizlik ILERI harekete ozgudur. Ayni testin yan (strafe) hali P=0.30
+# D=0.015 ile 0.3 deg salinim verirken ILERI hali 16.5 deg veriyordu -- yani sorun
+# otelenmenin yonune bagli bir yaw kuplaji (sim itici geometrisi BlueROV2-Heavy
+# referansi + MOT_*_DIRECTION override'i; bkz. GELISTIRME_OZETI 3. tablo).
+# ILERI harekette olcum (8 m, komut -90 deg; salinim / ort sapma / max):
+#   P=0.18 D=0                   -> 16.5 / 5.84 / 13.05 deg
+#   P=0.30 D=0.015               -> 14.6 / 1.10 /  7.43 deg
+#   P=0.45 D=0.030               ->  5.5 / 0.23 /  3.61 deg
+#   P=0.60 D=0.045 I=0.036       ->  0.3 / 0.02 /  0.14 deg   <- secildi
+# Ayni kazanclarla strafe hali: 5.6 / 0.29 / 3.53 deg (kabul edilebilir).
+# DIKKAT: bu kazanclar SIM'de bulundu; simdeki atalet ve itici geometrisi yaklasiktir
+# (BlueROV2-Heavy referansi, bkz. GELISTIRME_OZETI). Gercek araca suda dogrulamadan
+# TASIMA. Ayrica --defaults yalnizca eeprom SILININCE uygulanir (kullan.sh: eeprom.bin
+# varsa -w verilmez); mevcut eeprom'a gecmesi icin parametre ayrica set edilmelidir.
+ATC_RAT_YAW_P    0.60
+ATC_RAT_YAW_D    0.045
+ATC_RAT_YAW_I    0.036
