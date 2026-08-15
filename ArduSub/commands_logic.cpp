@@ -4,6 +4,11 @@
 
 static enum AutoSurfaceState auto_surface_state = AUTO_SURFACE_STATE_GO_TO_LOCATION;
 
+// AURA: how long MAV_CMD_AURA_POSITION_FIX holds the mission when param1 is left at 0.
+// Not zero: the reset has to travel through the estimator, AP_InertialNav and the
+// position controller before the next leg is computed from it.
+static constexpr uint32_t AURA_POSITION_FIX_DEFAULT_DWELL_MS = 1000;
+
 // start_command - this function will be called when the ap_mission lib wishes to start a new command
 bool Sub::start_command(const AP_Mission::Mission_Command& cmd)
 {
@@ -13,7 +18,8 @@ bool Sub::start_command(const AP_Mission::Mission_Command& cmd)
     // yields garbage and the check below would reject them with "Bad alt frame"
     // (seen with CONDITION_YAW).
     // is_nav_cmd() alone is NOT enough: NAV_DELAY, NAV_RETURN_TO_LAUNCH,
-    // NAV_SET_YAW_SPEED and AURA_ANCHOR are nav commands without a Location.
+    // NAV_SET_YAW_SPEED, AURA_ANCHOR and AURA_POSITION_FIX are nav commands without a
+    // Location.
     // stored_in_location() is the correct predicate.
     if (AP_Mission::is_nav_cmd(cmd) && AP_Mission::stored_in_location(cmd.id)) {
         const Location &target_loc = cmd.content.location;
@@ -76,6 +82,10 @@ bool Sub::start_command(const AP_Mission::Mission_Command& cmd)
 
     case AP_Mission::MAV_CMD_AURA_ANCHOR:       // 31010 AURA: drop anchor
         do_anchor(cmd);
+        break;
+
+    case AP_Mission::MAV_CMD_AURA_POSITION_FIX: // 31015 AURA: snap the solution to a point
+        do_position_fix(cmd);
         break;
 
         //
@@ -190,6 +200,9 @@ bool Sub::verify_command(const AP_Mission::Mission_Command& cmd)
 
     case AP_Mission::MAV_CMD_AURA_ANCHOR:
         return verify_anchor(cmd);
+
+    case AP_Mission::MAV_CMD_AURA_POSITION_FIX:
+        return verify_position_fix(cmd);
 
         ///
         /// conditional commands
@@ -454,6 +467,58 @@ void Sub::do_anchor(const AP_Mission::Mission_Command& cmd)
                     (unsigned)cmd.content.aura_anchor.duration_s,
                     cmd.content.aura_anchor.yaw_valid ? ", turn" : "",
                     cmd.content.aura_anchor.take_photo ? ", photo" : "");
+}
+
+// AURA: do_position_fix - snap the navigation solution onto a known point.
+//   param1 -> dwell_ms    : wait after the reset before advancing (0 = 1 s)
+//   param2 -> accuracy_cm : 1-sigma position uncertainty given to the EKF (0 = default)
+// The coordinate is deliberately NOT carried by this command: it is taken from the
+// next nav command that stores a Location. Dropped in front of the waypoint the
+// vehicle is physically sitting on, the item means "you are standing on that point" -
+// the same operation as SonarView's Set Location. A DVL solution drifts, and without
+// this correction every leg after the drift inherits the error.
+void Sub::do_position_fix(const AP_Mission::Mission_Command& cmd)
+{
+    posfix_start_ms = AP_HAL::millis();
+    posfix_skipped = false;
+    posfix_relocked = false;
+
+    AP_Mission::Mission_Command next;
+    if (!mission.get_next_nav_cmd(cmd.index + 1, next) ||
+        !AP_Mission::stored_in_location(next.id)) {
+        // Nothing to read the coordinate from. Skipping keeps a mission that was
+        // edited down to nothing from stalling on an item that can never complete.
+        gcs().send_text(MAV_SEVERITY_WARNING, "Position fix: no waypoint after it, skipped");
+        posfix_skipped = true;
+        return;
+    }
+
+#if AP_AHRS_POSITION_RESET_ENABLED
+    // Horizontal only - NavEKF3_core::setLatLng ignores the altitude element, which is
+    // right: depth comes from the barometer and is never the thing that drifted.
+    const Location &loc = next.content.location;
+    // NaN means "accuracy unknown", and the EKF then falls back to its own position
+    // noise parameter. That is the honest default for an operator-placed waypoint.
+    const float accuracy_m = cmd.content.aura_position_fix.accuracy_cm > 0
+                             ? cmd.content.aura_position_fix.accuracy_cm * 0.01f
+                             : nanf("");
+    if (!ahrs.handle_external_position_estimate(loc, accuracy_m, AP_HAL::millis())) {
+        // NavEKF3_core::setLatLng refuses in two cases, and both are worth shouting
+        // about rather than silently continuing on the drifted solution:
+        //   - a GPS-class source is still passing its position checks (UGPS, GPS_INPUT,
+        //     and the fake GPS in SITL). The reset is only for a dead-reckoning
+        //     solution, i.e. the DVL/velocity-aided case this command exists for.
+        //   - there is no aiding at all, or no EKF origin yet.
+        gcs().send_text(MAV_SEVERITY_ERROR, "Position fix: REJECTED by EKF (GPS aiding?)");
+        posfix_skipped = true;
+        return;
+    }
+    gcs().send_text(MAV_SEVERITY_INFO, "Position fix: %.7f %.7f",
+                    (double)loc.lat * 1.0e-7, (double)loc.lng * 1.0e-7);
+#else
+    gcs().send_text(MAV_SEVERITY_ERROR, "Position fix: not built into this firmware");
+    posfix_skipped = true;
+#endif
 }
 
 #if NAV_GUIDED
@@ -801,6 +866,37 @@ bool Sub::verify_anchor(const AP_Mission::Mission_Command& cmd)
         return true;
     }
     return false;
+}
+
+// AURA: verify_position_fix - wait out the dwell after the solution was moved.
+// The reset moves the vehicle's ESTIMATE, not the vehicle. Whatever the previous leg
+// left in wp_nav is a point in the old frame, so holding it would make the sub fly the
+// reset delta to reach a place it is already sitting on. auto_loiter_start() re-locks
+// onto the post-reset stopping point, and it runs here rather than in do_position_fix()
+// because of loop ordering: read_inertia() has already run for this iteration when
+// mission.update() is reached, so AP_InertialNav still reports the pre-reset position
+// until the next loop. The dwell then gives the estimator and the controller a moment
+// to settle before the next leg is computed from the corrected solution.
+bool Sub::verify_position_fix(const AP_Mission::Mission_Command& cmd)
+{
+    if (posfix_skipped) {
+        return true;
+    }
+
+    if (!posfix_relocked) {
+        posfix_relocked = true;
+        if (!mode_auto.auto_loiter_start()) {
+            // Only fails without a position source, and do_position_fix() already
+            // needed one to get this far. Say it rather than hold the mission: the
+            // previous leg's controller stays in charge and the dwell still expires.
+            gcs().send_text(MAV_SEVERITY_WARNING, "Position fix: could not re-lock hold");
+        }
+    }
+
+    const uint32_t dwell_ms = cmd.content.aura_position_fix.dwell_ms > 0
+                              ? cmd.content.aura_position_fix.dwell_ms
+                              : AURA_POSITION_FIX_DEFAULT_DWELL_MS;
+    return (AP_HAL::millis() - posfix_start_ms) >= dwell_ms;
 }
 
 /********************************************************************************/
