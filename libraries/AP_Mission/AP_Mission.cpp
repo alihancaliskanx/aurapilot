@@ -545,7 +545,11 @@ bool AP_Mission::is_nav_cmd(const Mission_Command& cmd)
             cmd.id == MAV_CMD_NAV_SCRIPT_TIME ||
             cmd.id == MAV_CMD_NAV_ATTITUDE_TIME ||
             // AURA: drop anchor is a NAV command -> blocks the mission until verify passes
-            cmd.id == MAV_CMD_AURA_ANCHOR);
+            cmd.id == MAV_CMD_AURA_ANCHOR ||
+            // AURA: so is the position fix - it has to hold the mission for its dwell,
+            // and it reads the coordinate of the nav command that follows it, so it
+            // must sit in the nav chain rather than run as a do-command beside one.
+            cmd.id == MAV_CMD_AURA_POSITION_FIX);
 }
 
 /// get_next_nav_cmd - gets next "navigation" command found at or after start_index
@@ -1423,18 +1427,29 @@ MAV_MISSION_RESULT AP_Mission::mavlink_int_to_mission_cmd(const mavlink_mission_
         // in whole degrees with negative meaning "no turn" - the same convention the
         // plan generators already use for a target's heading. y is the shutter flag,
         // z the settle-on-heading wait before it fires.
-        // Plans written before the turn and the shutter moved inside the anchor leave
-        // x, y and z at zero. Taken literally x=0 reads as "face north" - a heading the
-        // vehicle really would slew to at every stop, silently overriding whatever the
-        // plan meant. Both generators only ever emit a heading together with a shutter,
-        // so an all-zero triple can only be a legacy plan; treat it as "no turn".
-        {
-            const bool legacy_zero = (packet.x == 0) && (packet.y == 0) && is_zero(packet.z);
-            cmd.content.aura_anchor.yaw_valid = (packet.x >= 0) && !legacy_zero;
-        }
+        // x < 0 is the only "no turn" there is. An all-zero x/y/z triple used to be read
+        // as a legacy plan (written before the turn and the shutter moved inside the
+        // anchor) and forced to "no turn", on the reasoning that a heading was only ever
+        // emitted together with a shutter. The two-anchor pattern broke that reasoning:
+        // its first anchor turns to the camera heading at depth and takes no photo, so
+        // x=0 y=0 z=0 is exactly what a target facing due north produces - and the
+        // vehicle silently skipped the turn. A misread legacy plan slews to north at
+        // each stop, which is visible and recoverable; a target that silently refuses to
+        // aim is neither, so the guard goes. No plan file in the repo carries an anchor
+        // written that way, and both generators emit -1 for "no heading".
+        cmd.content.aura_anchor.yaw_valid = (packet.x >= 0);
         cmd.content.aura_anchor.yaw_deg = cmd.content.aura_anchor.yaw_valid ? (packet.x % 360) : 0;
         cmd.content.aura_anchor.take_photo = (packet.y != 0);
         cmd.content.aura_anchor.photo_delay_s = constrain_float(packet.z, 0, 31);
+        break;
+
+    // AURA: position fix
+    case MAV_CMD_AURA_POSITION_FIX:
+        // param1 = dwell (s). 0 is not "advance immediately": the reset needs a moment
+        // to settle through the estimator and the controller before the next leg is
+        // computed from it, so an unset box means the 1 s default rather than none.
+        cmd.content.aura_position_fix.dwell_ms = constrain_float(packet.param1 * 1000.0f, 0, UINT16_MAX);
+        cmd.content.aura_position_fix.accuracy_cm = constrain_float(packet.param2 * 100.0f, 0, UINT16_MAX);
         break;
 
     case MAV_CMD_NAV_ATTITUDE_TIME:
@@ -1976,6 +1991,15 @@ bool AP_Mission::mission_cmd_to_mavlink_int(const AP_Mission::Mission_Command& c
         // headings shift by 1 on every round trip and it accumulates (52 -> 51 -> 50).
         // It also makes the heading show up as 9.1e-06 in the plan file and as "0" in
         // the item editor, where touching the field turns it into a real due north.
+        packet.frame = MAV_FRAME_MISSION;
+        break;
+
+    // AURA: position fix
+    case MAV_CMD_AURA_POSITION_FIX:
+        packet.param1 = cmd.content.aura_position_fix.dwell_ms * 0.001f;
+        packet.param2 = cmd.content.aura_position_fix.accuracy_cm * 0.01f;
+        // Same reason as the anchor above: x/y are unused here, not a coordinate, so
+        // the frame has to say so or a GCS reads them as 1e7-scaled degrees.
         packet.frame = MAV_FRAME_MISSION;
         break;
 
@@ -2968,6 +2992,8 @@ const char *AP_Mission::Mission_Command::type() const
         return "NavAttitudeTime";
     case MAV_CMD_AURA_ANCHOR:
         return "Anchor";
+    case MAV_CMD_AURA_POSITION_FIX:
+        return "PositionFix";
     case MAV_CMD_DO_PAUSE_CONTINUE:
         return "PauseContinue";
     case MAV_CMD_DO_GIMBAL_MANAGER_PITCHYAW:

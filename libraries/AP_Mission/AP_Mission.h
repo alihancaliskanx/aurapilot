@@ -238,6 +238,23 @@ public:
     static_assert(sizeof(Aura_Anchor_Command) == 10,
                   "Aura_Anchor_Command must fit the 10-byte content block of a 16-bit-id command");
 
+    // AURA: "position fix" mission command - snap the navigation solution onto a
+    // known point, the same operation as SonarView's Set Location.
+    // Declared as 31015 on the wire; hasLocation=false, so the content union is free.
+    // The coordinate is NOT carried here: it is read from the NEXT nav command that
+    // stores a Location. Placed immediately before the waypoint the vehicle is
+    // physically sitting on, the item says "you are standing on that point" - a DVL
+    // solution drifts, and without this every later leg inherits the error.
+    static constexpr uint16_t MAV_CMD_AURA_POSITION_FIX = 31015;
+
+    struct PACKED Aura_Position_Fix_Command {
+        uint16_t dwell_ms;      // wait after the reset before advancing (ms), 0 = 1 s
+        uint16_t accuracy_cm;   // 1-sigma position uncertainty handed to the EKF (cm),
+                                // 0 = let the EKF use its own GPS position noise
+    };
+    static_assert(sizeof(Aura_Position_Fix_Command) == 4,
+                  "Aura_Position_Fix_Command must fit the 10-byte content block of a 16-bit-id command");
+
     // winch command structure
     struct PACKED Winch_Command {
         uint8_t num;            // winch number
@@ -396,6 +413,9 @@ public:
 
         // AURA drop anchor
         Aura_Anchor_Command aura_anchor;
+
+        // AURA position fix
+        Aura_Position_Fix_Command aura_position_fix;
 
         // do-winch
         Winch_Command winch;
@@ -824,7 +844,8 @@ public:
     // AURA: made public - vehicle code (ArduSub::start_command) needs to know
     // whether a command really carries a Location in its content union.
     // is_nav_cmd() alone is not enough: NAV_DELAY / NAV_RETURN_TO_LAUNCH /
-    // NAV_SET_YAW_SPEED / AURA_ANCHOR are nav commands yet carry no Location.
+    // NAV_SET_YAW_SPEED / AURA_ANCHOR / AURA_POSITION_FIX are nav commands yet carry
+    // no Location.
     static bool stored_in_location(uint16_t id);
 
 private:
