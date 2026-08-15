@@ -299,6 +299,11 @@ private:
     // mission settings / home item, so it can never be an anchor.
     uint16_t anchor_photo_cmd_index = AP_MISSION_CMD_INDEX_NONE;
 
+    // AURA: position fix state
+    uint32_t posfix_start_ms;   // when the command started (the dwell counts from here)
+    bool posfix_skipped;        // no waypoint to read, or the EKF refused -> pass through
+    bool posfix_relocked;       // the hold has been re-established in the corrected frame
+
     // Battery Sensors
     AP_BattMonitor battery{MASK_LOG_CURRENT,
                            FUNCTOR_BIND_MEMBER(&Sub::handle_battery_failsafe, void, const char*, const int8_t),
@@ -559,6 +564,7 @@ private:
 #endif
     void do_nav_delay(const AP_Mission::Mission_Command& cmd);
     void do_anchor(const AP_Mission::Mission_Command& cmd);
+    void do_position_fix(const AP_Mission::Mission_Command& cmd);
     void do_wait_delay(const AP_Mission::Mission_Command& cmd);
     void do_within_distance(const AP_Mission::Mission_Command& cmd);
     void do_yaw(const AP_Mission::Mission_Command& cmd);
@@ -576,6 +582,7 @@ private:
 #endif
     bool verify_nav_delay(const AP_Mission::Mission_Command& cmd);
     bool verify_anchor(const AP_Mission::Mission_Command& cmd);
+    bool verify_position_fix(const AP_Mission::Mission_Command& cmd);
 
     void failsafe_leak_check();
     void failsafe_internal_pressure_check();
