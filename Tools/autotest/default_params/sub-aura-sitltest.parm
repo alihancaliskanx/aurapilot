@@ -121,7 +121,19 @@ INS_ACC3OFFS_Y   0
 INS_ACC3OFFS_Z   0
 AHRS_TRIM_X      0
 AHRS_TRIM_Y      0
-RNGFND1_TYPE     0
+# --- TABAN MESAFESI (2026-08-20) ---
+# Eskiden 0 idi: SITL'de rangefinder besleyen bir sey YOKTU, acik birakmak
+# "unhealthy" prearm uyarisi uretiyordu. Artik var: modelde asagi bakan tek
+# isinli gpu_lidar (aura_auv_sitl/model.sdf altimetre_link) +
+# simulation/docker/rangefinder_bridge.py -> DISTANCE_SENSOR (orient 25).
+# 10 = MAVLink; GERCEK ARACTA DA 10 (Tracker 650 standoff'u SonarView ile
+# enjekte ediliyor) -> SURFTRAK ve terrain-frame gorevler icin firmware yolu
+# sim ile arac arasinda BIREBIR ayni.
+# POS_Z: gz sensoru govde merkezinin 0.22 m ALTINDA (FLU z=-0.22); ArduPilot
+# govde cercevesi FRD oldugu icin +0.22. Isin govde gorseline carpmasin diye
+# asagi kondu -- gpu_lidar collision'i degil VISUAL'i gorur.
+RNGFND1_TYPE     10
+RNGFND1_POS_Z    0.22
 
 # --- YAW SONUMU (YALNIZ SITL — gercek arac tuning'i sub-aura.parm'da DEGISMEDI) ---
 # Sim'de arac otelenirken burnu +/-13 deg salinip duruyordu: yaw hiz dongusunde D terimi
