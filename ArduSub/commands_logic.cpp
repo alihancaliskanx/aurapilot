@@ -477,15 +477,46 @@ void Sub::do_anchor(const AP_Mission::Mission_Command& cmd)
 // vehicle is physically sitting on, the item means "you are standing on that point" -
 // the same operation as SonarView's Set Location. A DVL solution drifts, and without
 // this correction every leg after the drift inherits the error.
+// "Next nav command that stores a Location" is meant literally: nav commands that
+// carry no Location (AURA_ANCHOR, NAV_DELAY, ...) are stepped over rather than ending
+// the search.
 void Sub::do_position_fix(const AP_Mission::Mission_Command& cmd)
 {
     posfix_start_ms = AP_HAL::millis();
     posfix_skipped = false;
     posfix_relocked = false;
 
+    // Walk forward to the first nav command that actually stores a Location. It is not
+    // always the immediate next one: AURA_ANCHOR is a nav command with no Location, and
+    // the start gate deliberately puts one in between - the mission opens with
+    // fix -> anchor -> fix -> dive in place, so the hold happens on an already
+    // corrected solution and the second fix clears whatever that hold drifted.
+    // Stopping at the first location-less nav command skipped the leading fix outright
+    // ("no waypoint after it"), which is why hand-written plans grew a dummy waypoint
+    // between the two - given a positive altitude so ArduSub would reject it - purely
+    // to carry the coordinate. Stepping over them is safe: nothing between here and
+    // that waypoint moves the vehicle, an anchor holds station and a delay waits.
     AP_Mission::Mission_Command next;
-    if (!mission.get_next_nav_cmd(cmd.index + 1, next) ||
-        !AP_Mission::stored_in_location(next.id)) {
+    bool found = false;
+    uint16_t search_index = cmd.index + 1;
+    // Bounded rather than "to the end of the mission": get_next_nav_cmd() follows
+    // DO_JUMPs, so a mission that jumps backwards could hand back the same command for
+    // ever. Eight hops is far more than any generated pattern puts between a fix and
+    // its waypoint.
+    for (uint8_t hop = 0; hop < 8; hop++) {
+        if (!mission.get_next_nav_cmd(search_index, next)) {
+            break;
+        }
+        if (AP_Mission::stored_in_location(next.id)) {
+            found = true;
+            break;
+        }
+        if (next.index < search_index) {
+            break;      // a jump sent the search backwards - do not chase it
+        }
+        search_index = next.index + 1;
+    }
+    if (!found) {
         // Nothing to read the coordinate from. Skipping keeps a mission that was
         // edited down to nothing from stalling on an item that can never complete.
         gcs().send_text(MAV_SEVERITY_WARNING, "Position fix: no waypoint after it, skipped");

@@ -241,8 +241,10 @@ public:
     // AURA: "position fix" mission command - snap the navigation solution onto a
     // known point, the same operation as SonarView's Set Location.
     // Declared as 31015 on the wire; hasLocation=false, so the content union is free.
-    // The coordinate is NOT carried here: it is read from the NEXT nav command that
-    // stores a Location. Placed immediately before the waypoint the vehicle is
+    // The coordinate is NOT carried here: it is read from the next nav command that
+    // stores a Location - nav commands that carry none (this one, AURA_ANCHOR,
+    // NAV_DELAY) are stepped over, so the start gate can put a hold between the fix and
+    // the waypoint that names the point. Placed ahead of the waypoint the vehicle is
     // physically sitting on, the item says "you are standing on that point" - a DVL
     // solution drifts, and without this every later leg inherits the error.
     static constexpr uint16_t MAV_CMD_AURA_POSITION_FIX = 31015;
