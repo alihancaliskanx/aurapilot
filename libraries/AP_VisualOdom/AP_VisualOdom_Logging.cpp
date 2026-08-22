@@ -6,7 +6,7 @@
 #include <AP_Logger/AP_Logger.h>
 
 // Write visual odometry sensor data
-void AP_VisualOdom_Backend::Write_VisualOdom(float time_delta, const Vector3f &angle_delta, const Vector3f &position_delta, float confidence)
+void AP_VisualOdom_Backend::Write_VisualOdom(float time_delta, const Vector3f &angle_delta, const Vector3f &position_delta, float confidence, bool ignored)
 {
     const struct log_VisualOdom pkt_visualodom {
         LOG_PACKET_HEADER_INIT(LOG_VISUALODOM_MSG),
@@ -18,7 +18,8 @@ void AP_VisualOdom_Backend::Write_VisualOdom(float time_delta, const Vector3f &a
         position_delta_x    : position_delta.x,
         position_delta_y    : position_delta.y,
         position_delta_z    : position_delta.z,
-        confidence          : confidence
+        confidence          : confidence,
+        ignored             : ignored
     };
     AP::logger().WriteBlock(&pkt_visualodom, sizeof(log_VisualOdom));
 }

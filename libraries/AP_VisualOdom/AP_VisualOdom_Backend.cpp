@@ -54,26 +54,39 @@ void AP_VisualOdom_Backend::handle_vision_position_delta_msg(const mavlink_messa
     const uint32_t now_ms = AP_HAL::millis();
     _last_update_ms = now_ms;
 
+    _quality = (int8_t)constrain_float(packet.confidence, 0.0f, 100.0f);
+
     // send to EKF
 #if AP_AHRS_ENABLED || HAL_LOGGING_ENABLED
     const float time_delta_sec = packet.time_delta_usec * 1.0E-6;
+
+    // AURA: dip kilidi olmayan DVL confidence=0 ve delta=(0,0,0) yollar; bunlar
+    // EKF'e girerse arac "duruyor" diye fuze edilir ve konum donar.  QUAL_MIN
+    // kapisi upstream'de yalniz pozisyon/hiz mesajlarinda vardi, delta yolunda yoktu.
+    // VISO_QUAL_MIN = -1 ise kullanici bilerek kotu veriyi de istiyor demektir.
+    const int8_t quality_min = _frontend.get_quality_min();
+    const bool ignored = (quality_min >= 0) &&
+                         (!is_positive(packet.confidence) || _quality < quality_min);
 #endif
 #if AP_AHRS_ENABLED
-    AP::ahrs().writeBodyFrameOdom(packet.confidence,
-                                  position_delta,
-                                  angle_delta,
-                                  time_delta_sec,
-                                  now_ms,
-                                  _frontend.get_delay_ms(),
-                                  _frontend.get_pos_offset());
+    if (!ignored) {
+        AP::ahrs().writeBodyFrameOdom(packet.confidence,
+                                      position_delta,
+                                      angle_delta,
+                                      time_delta_sec,
+                                      now_ms,
+                                      _frontend.get_delay_ms(),
+                                      _frontend.get_pos_offset());
+    }
 #endif
 
 #if HAL_LOGGING_ENABLED
-    // log sensor data
+    // log sensor data (atlanan ornekler de loglanir, Ign alaniyla isaretli)
     Write_VisualOdom(time_delta_sec,
                                   angle_delta,
                                   position_delta,
-                                  packet.confidence);
+                                  packet.confidence,
+                                  ignored);
 #endif
 }
 #endif  // HAL_GCS_ENABLED

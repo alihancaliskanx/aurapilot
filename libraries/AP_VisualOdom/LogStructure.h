@@ -19,6 +19,7 @@
 // @Field: PosDY: Position change for body-frame Y axis (Right-Left)
 // @Field: PosDZ: Position change for body-frame Z axis (Down-Up)
 // @Field: conf: Confidence
+// @Field: Ign: Ignored (quality below VISO_QUAL_MIN, not sent to EKF)
 struct PACKED log_VisualOdom {
     LOG_PACKET_HEADER;
     uint64_t time_us;
@@ -30,6 +31,7 @@ struct PACKED log_VisualOdom {
     float position_delta_y;
     float position_delta_z;
     float confidence;
+    uint8_t ignored;
 };
 
 // @LoggerMessage: VISP
@@ -95,7 +97,7 @@ struct PACKED log_VisualVelocity {
 #if HAL_VISUALODOM_ENABLED
 #define LOG_STRUCTURE_FROM_VISUALODOM \
     { LOG_VISUALODOM_MSG, sizeof(log_VisualOdom), \
-      "VISO", "Qffffffff", "TimeUS,dt,AngDX,AngDY,AngDZ,PosDX,PosDY,PosDZ,conf", "ssrrrmmm-", "FF000000-" }, \
+      "VISO", "QffffffffB", "TimeUS,dt,AngDX,AngDY,AngDZ,PosDX,PosDY,PosDZ,conf,Ign", "ssrrrmmm--", "FF000000--" }, \
     { LOG_VISUALPOS_MSG, sizeof(log_VisualPosition), \
       "VISP", "QQIffffffffBBb", "TimeUS,RTimeUS,CTimeMS,PX,PY,PZ,R,P,Y,PErr,AErr,Rst,Ign,Q", "sssmmmddhmd--%", "FFC00000000--0" }, \
     { LOG_VISUALVEL_MSG, sizeof(log_VisualVelocity), \
