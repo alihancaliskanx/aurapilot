@@ -108,7 +108,7 @@ const AP_Param::GroupInfo AP_VisualOdom::var_info[] = {
 
     // @Param: _QUAL_MIN
     // @DisplayName: Visual odometry minimum quality
-    // @Description: Visual odometry will only be sent to EKF if over this value. -1 to always send (even bad values), 0 to send if good or unknown
+    // @Description: Visual odometry will only be sent to EKF if over this value. -1 to always send (even bad values), 0 to send if good or unknown. Also gates body-frame deltas (VISION_POSITION_DELTA, e.g. DVL): at 0 or above, samples with zero confidence are discarded
     // @Units: %
     // @Range: -1 100
     // @User: Advanced
