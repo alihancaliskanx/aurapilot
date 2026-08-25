@@ -120,6 +120,11 @@ const AP_Scheduler::Task Sub::scheduler_tasks[] = {
     SCHED_TASK_CLASS(RC_Channels, (RC_Channels*)&sub.g2.rc_channels, read_aux_all, 10,  50,  18),
 #endif
     SCHED_TASK(three_hz_loop,          3,     75,  21),
+    // AURA: SmartRTL kirinti yolu HER MODDA birikmeli (AP_SmartRTL basligi
+    // "3 Hz ya da daha hizli, arac hangi modda olursa olsun" diyor). Agir is
+    // (sadelestirme + dongu budama) IO thread'inde, zaman kutulu calisiyor;
+    // buradaki cagri en fazla bir nokta ekler.
+    SCHED_TASK_CLASS(ModeSmartRtl, &sub.mode_smartrtl, save_position,  3, 100,  22),
     SCHED_TASK(update_turn_counter,   10,     50,  24),
     SCHED_TASK(one_hz_loop,            1,    100,  33),
     SCHED_TASK_CLASS(GCS,                 (GCS*)&sub._gcs,   update_receive,     400, 180,  36),

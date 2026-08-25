@@ -257,6 +257,50 @@ public:
     static_assert(sizeof(Aura_Position_Fix_Command) == 4,
                   "Aura_Position_Fix_Command must fit the 10-byte content block of a 16-bit-id command");
 
+    // AURA: "fly a circle" mission command, with the CIRCLE mode's own parameters
+    // carried per item instead of read from the CIRCLE_* parameters.
+    //
+    // Why not just use NAV_LOITER_TURNS (18)? Its storage is full and its resolution is
+    // wrong for an AUV. It is stored_in_location, so the whole 12-byte content block is
+    // the Location and the only field left is p1 - whose low byte holds the turn count
+    // and whose high byte holds the radius as an 8-bit integer count of METRES. A 2.5 m
+    // orbit rounds to 2 m and a 0.5 m orbit becomes 0. The turn rate cannot be set per
+    // item at all; every circle in the mission runs at whatever CIRCLE_RATE happens to
+    // be, and its direction comes from that parameter's sign too. For a vehicle that
+    // inspects things from 0.5-30 m away, none of that is usable.
+    //
+    // Declared as 31020 on the wire; hasLocation=false, so the content union is free.
+    // The centre is therefore NOT a Location: a 16-bit command id leaves only 10 bytes
+    // of storage and a PackedLocation needs 12 (AP_Mission.cpp asserts this). Instead
+    // the centre is either the vehicle's position when the item starts - the anchor's
+    // convention, and the usual case, since you navigate to the target and then orbit
+    // it - or, with centre_from_wp set, the coordinate of the next nav command that
+    // stores a Location, which is the position-fix command's convention.
+    static constexpr uint16_t MAV_CMD_AURA_CIRCLE = 31020;
+
+    struct PACKED Aura_Circle_Command {
+        uint16_t radius_cm;         // orbit radius (cm), 1 cm resolution; 0 = use CIRCLE_RADIUS_M
+        int16_t  rate_cdegs;        // angular rate (centi-deg/s), SIGN = direction
+                                    // (+ clockwise, - counter-clockwise); 0 = use CIRCLE_RATE
+        uint16_t turns_centi;       // number of turns x100, so quarter turns are expressible;
+                                    // 0 = one full turn
+        int16_t  depth_cm;          // target depth (cm above home, so negative = submerged).
+                                    // 0 = hold the depth the vehicle is already at, the same
+                                    // "no altitude given" convention do_nav_wp uses.
+        uint16_t yaw_deg     : 9;   // fixed heading 0..359, only read when yaw_mode == 2
+        uint16_t yaw_mode    : 2;   // 0 = face the centre (the camera-on-target case),
+                                    // 1 = hold the heading the circle started on,
+                                    // 2 = hold yaw_deg, 3 = face the direction of travel
+        uint16_t centre_from_wp : 1;// 1 = centre on the next location-carrying nav command,
+                                    // 0 = centre on the vehicle's position when this starts
+        uint16_t yaw_valid   : 1;   // 0 = no heading was given (wire x < 0), so yaw_mode 2
+                                    // falls back to facing the centre rather than silently
+                                    // holding due north. Same convention as the anchor.
+        uint16_t reserved    : 3;   // must be zero
+    };
+    static_assert(sizeof(Aura_Circle_Command) == 10,
+                  "Aura_Circle_Command must fit the 10-byte content block of a 16-bit-id command");
+
     // winch command structure
     struct PACKED Winch_Command {
         uint8_t num;            // winch number
@@ -418,6 +462,7 @@ public:
 
         // AURA position fix
         Aura_Position_Fix_Command aura_position_fix;
+        Aura_Circle_Command aura_circle;
 
         // do-winch
         Winch_Command winch;

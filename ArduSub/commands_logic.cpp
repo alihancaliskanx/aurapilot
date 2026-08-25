@@ -51,6 +51,9 @@ bool Sub::start_command(const AP_Mission::Mission_Command& cmd)
         break;
 
     case MAV_CMD_NAV_LAND:              // 21 LAND to Waypoint
+    case MAV_CMD_NAV_VTOL_LAND:         // 85 - Copter'da da NAV_LAND'in takma adi.
+                                        // QGC bazi planlarda bunu uretiyor; kabul
+                                        // etmezsek satha cikis item'i sessizce atlanir.
         do_surface(cmd);
         break;
 
@@ -64,6 +67,14 @@ bool Sub::start_command(const AP_Mission::Mission_Command& cmd)
 
     case MAV_CMD_NAV_LOITER_TURNS:              //18 Loiter N Times
         do_circle(cmd);
+        break;
+
+    case AP_Mission::MAV_CMD_AURA_CIRCLE:       // 31020 daire, kendi parametreleriyle
+        do_aura_circle(cmd);
+        break;
+
+    case MAV_CMD_NAV_ATTITUDE_TIME:            // 42703 tutumu N saniye koru
+        mode_auto.auto_nav_attitude_time_start(cmd);
         break;
 
     case MAV_CMD_NAV_LOITER_TIME:              // 19
@@ -133,6 +144,16 @@ bool Sub::start_command(const AP_Mission::Mission_Command& cmd)
         break;
 #endif
 
+    // Isaretci komutlar: kendileri bir sey YAPMAZ, plandaki bir yeri isaretlerler.
+    // AP_Mission bayraklari (in_landing_sequence / in_return_path) zaten kendisi
+    // kuruyor; ArduSub'in tek yapmasi gereken komutu tanimak. Tanimadigi icin
+    // QGC'nin standart olarak urettigi her inis dizisi planinda item BASINA IKI
+    // uyari basiliyordu ("Ignoring command 189" + "Skipping invalid cmd #189"),
+    // operator de gercek hatalari bu gurultunun icinde kaybediyordu.
+    case MAV_CMD_DO_LAND_START:             // 189
+    case MAV_CMD_DO_RETURN_PATH_START:      // 188
+        break;
+
     default:
         // unable to use the command, allow the vehicle to try the next command
         gcs().send_text(MAV_SEVERITY_WARNING, "Ignoring command %d", cmd.id);
@@ -176,6 +197,7 @@ bool Sub::verify_command(const AP_Mission::Mission_Command& cmd)
         return verify_nav_wp(cmd);
 
     case MAV_CMD_NAV_LAND:
+    case MAV_CMD_NAV_VTOL_LAND:
         return verify_surface(cmd);
 
     case MAV_CMD_NAV_RETURN_TO_LAUNCH:
@@ -186,6 +208,12 @@ bool Sub::verify_command(const AP_Mission::Mission_Command& cmd)
 
     case MAV_CMD_NAV_LOITER_TURNS:
         return verify_circle(cmd);
+
+    case AP_Mission::MAV_CMD_AURA_CIRCLE:
+        return verify_aura_circle(cmd);
+
+    case MAV_CMD_NAV_ATTITUDE_TIME:
+        return verify_nav_attitude_time(cmd);
 
     case MAV_CMD_NAV_LOITER_TIME:
         return verify_loiter_time();
@@ -225,6 +253,15 @@ bool Sub::verify_command(const AP_Mission::Mission_Command& cmd)
     case MAV_CMD_DO_MOUNT_CONTROL:
     case MAV_CMD_DO_SET_CAM_TRIGG_DIST:
     case MAV_CMD_DO_GUIDED_LIMITS:
+    // Isaretciler - start_command tarafindaki gerekceye bak.
+    case MAV_CMD_DO_LAND_START:             // 189
+    case MAV_CMD_DO_RETURN_PATH_START:      // 188
+    // DO_FENCE_ENABLE'i AP_Mission::start_command kendisi yakalar (start_command_fence),
+    // yani bu arac fonksiyonuna hic ulasmaz - ama AP_Mission::verify_command onu
+    // yakalamaz, buraya DUSER. Case yoksa cit gercekten acilip kapanirken ekrana
+    // "Skipping invalid cmd #207" basiliyordu. Copter'da da tam olarak bu sebeple
+    // yalniz verify tarafinda bir case var.
+    case MAV_CMD_DO_FENCE_ENABLE:           // 207
         return true;
 
     default:
@@ -277,12 +314,26 @@ void Sub::do_nav_wp(const AP_Mission::Mission_Command& cmd)
     // Budget three times the straight-line travel time plus the hold, never under a
     // minute; the legs that behave use a small fraction of that (the 14.6 m cruise
     // leg in the same mission took 56 s against a ~140 s budget).
+    aura_nav_guard_kur(loiter_time_max);
+}
+
+// AURA: seyir bacagi icin guard butcesi kur. Butce, duz hat seyir suresinin uc kati
+// arti bekleme suresi, asla bir dakikanin altinda degil (gerekce do_nav_wp'de).
+// do_nav_wp ve do_RTL ayni butceyi kullanir; formul tek yerde dursun diye ayrildi.
+void Sub::aura_nav_guard_kur(uint32_t bekleme_s)
+{
     nav_wp_start_ms = AP_HAL::millis();
     const float leg_cm = (wp_nav.get_wp_destination_NEU_cm() - wp_nav.get_wp_origin_NEU_cm()).length();
     const float speed_cms = MAX(wp_nav.get_default_speed_NE_cms(), 10.0f);
     nav_wp_guard_ms = MAX((uint32_t)(3000.0f * leg_cm / speed_cms)
-                          + loiter_time_max * 1000UL + 30000UL,
+                          + bekleme_s * 1000UL + 30000UL,
                           60000UL);
+}
+
+// Guard suresi doldu mu? (0 = guard yok)
+bool Sub::aura_nav_guard_doldu() const
+{
+    return nav_wp_guard_ms != 0 && AP_HAL::millis() - nav_wp_start_ms >= nav_wp_guard_ms;
 }
 
 // do_surface - initiate surface procedure
@@ -323,7 +374,42 @@ void Sub::do_surface(const AP_Mission::Mission_Command& cmd)
 
 void Sub::do_RTL()
 {
-    mode_auto.auto_wp_start(ahrs.get_home());
+    // AURA: eve MEVCUT DERINLIKTE donulur, satha cikilmaz.
+    //
+    // Eskiden burada dogrudan ahrs.get_home() vardi ve bu araci SATHA cikariyordu:
+    // Sub::set_home_to_current_location (commands.cpp) ev noktasini bilerek su
+    // yuzeyine tasir ("Make home always at the water's surface", derinlikte
+    // disarm/arm yapilabilsin diye), yani get_home().alt HER ZAMAN 0'dir. Hedef
+    // olarak verilince arac eve giderken ayni zamanda derinlik 0'a tirmaniyordu -
+    // uc kere yanlis: (1) satihta YATAY seyir, AURA kuralinin tam olarak yasakladigi
+    // sey; (2) satih tavani da devreye girmiyor, cunku tavan komut edilen hedefi
+    // "bilerek istenmis satha cikis" sayip kendini aciyor (mode_auto.cpp); (3)
+    // RETURN_TO_LAUNCH bir Location tasimadigi icin start_command'in irtifa-cercevesi
+    // denetimi de bu komutu hic gormuyor. SITL'de olculdu: -10 m'den -0.04 m'ye
+    // duzgun bir tirmanis.
+    //
+    // Satha cikmak isteyen plan bunu ACIKCA soyler: RTL'den sonra NAV_LAND (do_surface).
+    // DERINLIGI DONUSTURMEDEN, YENIDEN ETIKETLEYEREK al - do_surface (yukarida) da
+    // birebir boyle yapiyor.
+    //
+    // get_alt_cm(ABOVE_HOME) BURADA YANLIS OLUR ve denenip geri alindi: current_loc.alt
+    // aslinda EKF ORIJININE gore yukseklik (read_inertia: inertial_nav.get_position_z_up_cm())
+    // ama current_loc varsayilan kurulmus oldugu icin cerceve bayraklari 0, yani
+    // "ABSOLUTE" der. Gercek bir donusum bu sayiyi AMSL sanip ev irtifasini cikarir;
+    // hedef sonra ABOVE_ORIGIN'e cevrilirken orijin irtifasi da cikar. Net hata tam
+    // olarak EKF ORIJININ AMSL IRTIFASI kadardir: deniz seviyesinde 0 (bu yuzden
+    // SITL'de --home ...,0 ile GORUNMEZ), 584 m rakimli bir golde ise -10 m'lik bir
+    // RTL "594 m derinlige in" komutuna doner. Tum ArduSub bu yanlis etiketle yasar
+    // ve sayiyi donusturmez, yeniden etiketler; buranin da oyle yapmasi sart.
+    Location target_loc(ahrs.get_home());
+    target_loc.set_alt_cm(current_loc.alt, Location::AltFrame::ABOVE_HOME);
+
+    mode_auto.auto_wp_start(target_loc);
+
+    // verify_RTL'in de bir kacis kapisi olsun (verify_nav_wp ile ayni gerekce):
+    // reached_wp_destination() tek yonlu bir mandal, ulasilamayan bir eve giden RTL
+    // gorevi kalici olarak park ediyordu.
+    aura_nav_guard_kur(0);
 }
 
 // do_loiter_unlimited - start loitering with no end conditions
@@ -360,7 +446,10 @@ void Sub::do_circle(const AP_Mission::Mission_Command& cmd)
     }
     // calculate radius
     uint16_t circle_radius_m = HIGHBYTE(cmd.p1); // circle radius held in high byte of p1
-    if (cmd.type_specific_bits & (1U << 0)) {
+    // x10 olcegi NAV_LOITER_TURNS'e ozgu bir depolama numarasi (AP_Mission.cpp:1140).
+    // type_specific_bits baska komutlarda baska anlama gelebilir, o yuzden Copter gibi
+    // komut kimligi de kontrol edilir.
+    if (cmd.id == MAV_CMD_NAV_LOITER_TURNS && (cmd.type_specific_bits & (1U << 0))) {
         circle_radius_m *= 10;
     }
 
@@ -368,8 +457,112 @@ void Sub::do_circle(const AP_Mission::Mission_Command& cmd)
     // true if circle should be ccw
     const bool circle_direction_ccw = cmd.content.location.loiter_ccw;
 
+    // NAV_LOITER_TURNS item basina hiz TASIYAMAZ (p1 dolu, bkz. MAV_CMD_AURA_CIRCLE
+    // aciklamasi), o yuzden buyukluk parametreden gelir; item yalnizca yonu soyler.
+    const float rate_degs = circle_direction_ccw ? -fabsf(circle_nav.get_rate_degs())
+                                                 :  fabsf(circle_nav.get_rate_degs());
+
+    // Bu komut yaw kipi tasimaz: klasik davranis "merkeze bak".
+    daire_yaw_kip = 0;
+    daire_tur_hedefi = cmd.get_loiter_turns();
+
     // move to edge of circle (verify_circle) will ensure we begin circling once we reach the edge
-    mode_auto.auto_circle_movetoedge_start(circle_center, circle_radius_m, circle_direction_ccw);
+    mode_auto.auto_circle_movetoedge_start(circle_center, circle_radius_m, rate_degs);
+}
+
+// AURA: bir index'ten itibaren, konum TASIYAN ilk nav komutunu bul.
+//
+// do_position_fix'teki yuruteci ile ayni: konum tasimayan nav komutlarinin (demir,
+// NAV_DELAY, daire) ustunden atlar ve DO_JUMP'in geriye zincirlemesine karsi hop
+// sayisiyla sinirlidir.
+bool Sub::aura_sonraki_konumlu_wp(uint16_t index, Location &konum)
+{
+    AP_Mission::Mission_Command next;
+    uint16_t search_index = index;
+    for (uint8_t hop = 0; hop < 8; hop++) {
+        if (!mission.get_next_nav_cmd(search_index, next)) {
+            return false;
+        }
+        if (AP_Mission::stored_in_location(next.id)) {
+            konum = next.content.location;
+            return true;
+        }
+        if (next.index < search_index) {
+            return false;   // a jump sent the search backwards - do not chase it
+        }
+        search_index = next.index + 1;
+    }
+    return false;
+}
+
+// AURA: MAV_CMD_AURA_CIRCLE - daire, CIRCLE modunun kendi parametreleriyle.
+void Sub::do_aura_circle(const AP_Mission::Mission_Command& cmd)
+{
+    const AP_Mission::Aura_Circle_Command &d = cmd.content.aura_circle;
+
+    // ---- merkez ----
+    // Komut bir Location TASIMAZ (16 bitlik id -> 10 bayt, PackedLocation 12 bayt
+    // ister). Varsayilan merkez, item basladigindaki arac konumudur: normal kullanim
+    // "hedefe git, sonra etrafinda don" oldugu icin bu zaten dogru noktadir.
+    // centre_from_wp ile merkez, plandaki bir sonraki konumlu nav komutundan okunur
+    // (AURA_POSITION_FIX'in kullandigi yontem).
+    Location merkez(current_loc);
+    if (d.centre_from_wp) {
+        Location wp_konum;
+        if (aura_sonraki_konumlu_wp(cmd.index + 1, wp_konum)) {
+            merkez.lat = wp_konum.lat;
+            merkez.lng = wp_konum.lng;
+        } else {
+            gcs().send_text(MAV_SEVERITY_WARNING,
+                            "Circle: no waypoint after it, centring here");
+        }
+    }
+
+    // ---- derinlik ----
+    // 0 = "irtifa verilmedi, mevcut derinligi koru" (do_nav_wp ile ayni gelenek).
+    //
+    // POZITIF derinlik REDDEDILIR. Bu komut bir Location tasimadigi icin
+    // start_command'in basindaki irtifa-cercevesi denetiminden GECMEZ
+    // (stored_in_location degil), yani "Alt above home must be negative" korumasi ona
+    // ulasmaz. Korumasiz birakilamaz: satih tavani komut edilen hedefi "bilerek
+    // istenmis satha cikis" sayip kendini ona ACAR, dolayisiyla plan ureticisindeki
+    // bir isaret hatasi (z=+3 yerine -3) araci satihta, surekli yukari itkiyle bir tam
+    // tur dondururdu - AURA'nin acikca yasakladigi sey.
+    if (d.depth_cm > 0) {
+        gcs().send_text(MAV_SEVERITY_WARNING, "Circle: alt above home must be negative");
+        return;
+    }
+    merkez.set_alt_cm(d.depth_cm != 0 ? d.depth_cm : current_loc.alt,
+                      Location::AltFrame::ABOVE_HOME);
+
+    // ---- yaw kipi ----
+    // Kip 2 sabit bir yon ister; yon verilmemisse (x < 0, demirle ayni gelenek)
+    // "merkeze bak"a duselim. Aksi halde -1 sessizce 0'a, yani KUZEY'e donerdi.
+    daire_yaw_kip = (d.yaw_mode == 2 && !d.yaw_valid) ? 0 : d.yaw_mode;
+    daire_yaw_cd = d.yaw_deg * 100.0f;
+    // AC_Circle'in kendi yaw'i (merkeze bakma) yalniz kip 0 ve 3'te kullanilir;
+    // digerlerinde auto_circle_run bu degeri kullanir.
+
+    // ---- tur sayisi ----
+    daire_tur_hedefi = (d.turns_centi > 0) ? d.turns_centi * 0.01f : 1.0f;
+
+    const float yaricap_m = d.radius_cm * 0.01f;    // 0 -> CIRCLE_RADIUS_M
+    const float rate_degs = d.rate_cdegs * 0.01f;   // 0 -> CIRCLE_RATE (isaretiyle)
+
+    // NOT: istenen acisal hiz bir UST SINIRDIR. AC_Circle::calc_velocities onu ayrica
+    // pozisyon kontrolcusunun hiz/ivme limitleriyle kirpar: ulasilabilir en yuksek hiz
+    // kabaca WP_SPD / yaricap'tir. WP_SPD=0.6 m/s ile 0.5 m yaricapta ~69 deg/s
+    // mumkunken 10 m yaricapta ~3.4 deg/s'de doyar. Buyuk yaricapli bir dairede
+    // istenen hizin tutmamasi hata degil, bu sinirdir.
+    gcs().send_text(MAV_SEVERITY_INFO, "Circle: r=%.2fm %.2fdeg/s %.2f turns",
+                    (double)(is_zero(yaricap_m) ? circle_nav.get_radius_parm_m() : yaricap_m),
+                    (double)(is_zero(rate_degs) ? circle_nav.get_rate_degs() : rate_degs),
+                    (double)daire_tur_hedefi);
+
+    mode_auto.auto_circle_movetoedge_start(merkez, yaricap_m, rate_degs);
+
+    // Kenara gitme bacagi olusabilir; guard butcesi o bacak icin.
+    aura_nav_guard_kur(0);
 }
 
 // do_loiter_time - initiate loitering at a point for a given time period
@@ -575,7 +768,7 @@ bool Sub::verify_nav_wp(const AP_Mission::Mission_Command& cmd)
     // is a one-way latch on a 3D WPNAV_RADIUS test, so without this there is no
     // escape at all. Report how far short we gave up: that number is the whole
     // diagnosis when it fires.
-    if (nav_wp_guard_ms != 0 && AP_HAL::millis() - nav_wp_start_ms >= nav_wp_guard_ms) {
+    if (aura_nav_guard_doldu()) {
         gcs().send_text(MAV_SEVERITY_WARNING, "WP #%i: guard time expired, %.2fm short",
                         cmd.index,
                         (double)(wp_nav.get_wp_distance_to_destination_cm() * 0.01f));
@@ -641,7 +834,19 @@ bool Sub::verify_surface(const AP_Mission::Mission_Command& cmd)
     return retval;
 }
 
+// NAV_ATTITUDE_TIME: sure dolunca tamamlanir.
+bool Sub::verify_nav_attitude_time(const AP_Mission::Mission_Command& cmd)
+{
+    return (AP_HAL::millis() - mode_auto.nav_attitude_time_start_ms())
+           > (cmd.content.nav_attitude_time.time_sec * 1000UL);
+}
+
 bool Sub::verify_RTL() {
+    if (aura_nav_guard_doldu()) {
+        gcs().send_text(MAV_SEVERITY_WARNING, "RTL: guard time expired, %.2fm short",
+                        (double)(wp_nav.get_wp_distance_to_destination_cm() * 0.01f));
+        return true;
+    }
     return wp_nav.reached_wp_destination();
 }
 
@@ -673,23 +878,37 @@ bool Sub::verify_circle(const AP_Mission::Mission_Command& cmd)
     // check if we've reached the edge
     if (auto_mode == Auto_CircleMoveToEdge) {
         if (wp_nav.reached_wp_destination()) {
-            Vector3f circle_center;
-            UNUSED_RESULT(cmd.content.location.get_vector_from_origin_NEU_cm(circle_center));
-
-            // set lat/lon position if not provided
-            if (cmd.content.location.lat == 0 && cmd.content.location.lng == 0) {
-                circle_center.xy() = inertial_nav.get_position_xy_cm();
-            }
-
-            // start circling
+            // Buradaki circle_center hesabi OLU KODDU: degisken kuruluyor, sartli olarak
+            // .xy()'si eziliyor ve hicbir yerde kullanilmadan kapsam disina cikiyordu.
+            // Merkez zaten do_circle -> auto_circle_movetoedge_start -> set_center()
+            // yolunda circle_nav'a yazildi; auto_circle_start() argumansizdir ve merkezi
+            // oradan okur. Kaldirildi.
             mode_auto.auto_circle_start();
         }
         return false;
     }
-    const float turns = cmd.get_loiter_turns();
-
     // check if we have completed circling
-    return fabsf(sub.circle_nav.get_angle_total_rad()/M_2PI) >= turns;
+    return fabsf(sub.circle_nav.get_angle_total_rad()/M_2PI) >= daire_tur_hedefi;
+}
+
+// AURA: MAV_CMD_AURA_CIRCLE dogrulamasi. Tur sayimi verify_circle ile ayni; ayri
+// durmasinin sebebi kenar bacagindaki guard kapisi.
+bool Sub::verify_aura_circle(const AP_Mission::Mission_Command& cmd)
+{
+    if (auto_mode == Auto_CircleMoveToEdge) {
+        if (aura_nav_guard_doldu()) {
+            gcs().send_text(MAV_SEVERITY_WARNING, "Circle #%i: guard expired, starting anyway",
+                            cmd.index);
+            mode_auto.auto_circle_start();
+            return false;
+        }
+        if (wp_nav.reached_wp_destination()) {
+            mode_auto.auto_circle_start();
+        }
+        return false;
+    }
+
+    return fabsf(sub.circle_nav.get_angle_total_rad()/M_2PI) >= daire_tur_hedefi;
 }
 
 #if NAV_GUIDED

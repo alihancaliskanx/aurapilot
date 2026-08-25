@@ -41,6 +41,10 @@ Mode *Sub::mode_from_mode_num(const Mode::Number mode)
     case Mode::Number::SURFTRAK:
         ret = &mode_surftrak;
         break;
+
+    case Mode::Number::SMART_RTL:
+        ret = &mode_smartrtl;
+        break;
     case Mode::Number::POSHOLD:
         ret = &mode_poshold;
         break;
@@ -124,26 +128,24 @@ bool Sub::set_mode(Mode::Number mode, ModeReason reason)
 #endif
     gcs().send_message(MSG_HEARTBEAT);
 
+#if AP_CAMERA_ENABLED
+    // AP_Camera'ya AUTO'da olup olmadigimizi soyle.
+    //
+    // Bu cagri ArduSub'da HIC YOKTU (Copter'da var: ArduCopter/mode.cpp), yani
+    // _is_in_auto_mode her zaman false kaliyordu. Sonuc: CAM_AUTO_ONLY=1
+    // ayarlandiginda vehicle_mode_ok_for_trigg_dist() hicbir zaman true donmuyor ve
+    // MESAFEYE BAGLI KAMERA TETIKLEMESI (DO_SET_CAM_TRIGG_DIST) AUTO'da bile hic
+    // atesleme yapmiyordu - sessizce. Varsayilan 0 oldugu icin sorun gizli kalmis:
+    // parametrenin tarifi ("trigging by distance is done in AUTO mode only") bir
+    // survey operatorunun tam olarak acacagi sey.
+    camera.set_is_auto_mode(control_mode == Mode::Number::AUTO);
+#endif
+
     // update notify object
     notify_flight_mode();
 
     // return success
     return true;
-}
-
-// exit_mode - high level call to organise cleanup as a flight mode is exited
-void Sub::exit_mode(Mode::Number old_control_mode, Mode::Number new_control_mode)
-{
-    // stop mission when we leave auto mode
-    if (old_control_mode == Mode::Number::AUTO) {
-        if (mission.state() == AP_Mission::MISSION_RUNNING) {
-            mission.stop();
-        }
-#if HAL_MOUNT_ENABLED
-        camera_mount.set_mode_to_default();
-#endif  // HAL_MOUNT_ENABLED
-    }
-    motors.set_max_throttle(1.0f);
 }
 
 bool Sub::set_mode(const uint8_t new_mode, const ModeReason reason)
@@ -161,6 +163,29 @@ void Sub::update_flight_mode()
 
 // exit_mode - high level call to organise cleanup as a flight mode is exited
 void Sub::exit_mode(Mode *&old_flightmode, Mode *&new_flightmode){
+    // AUTO'dan cikarken gorevi durdur.
+    //
+    // Bu blok eskiden exit_mode'un IKINCI bir asiri yuklemesindeydi:
+    //     void Sub::exit_mode(Mode::Number old, Mode::Number new)
+    // ve HIC CAGRILMIYORDU. Tek cagri yeri set_mode() ve oradaki iki argumanin da
+    // turu Mode* ; Mode::Number ise "enum class", yani Mode*'dan ona ortuk donusum
+    // yok. Asiri yukleme cozumu bu yuzden her zaman asagidaki isaretci surumunu
+    // seciyor, enum surumu (ve icindeki mission.stop()) olu kod oluyordu.
+    //
+    // Sonuclari teorik degildi: AUTO'dan MANUAL'e gecince gorev MISSION_RUNNING'de
+    // kaliyor, bu da ARM haldeyken yeni gorev yuklemesini SESSIZCE reddettiriyordu
+    // (AP_Mission::clear(), armed && MISSION_RUNNING ise basarisiz doner) ve GCS'e
+    // arac elle surulurken "MISSION_STATE_ACTIVE" bildiriliyordu.
+    if (old_flightmode == &mode_auto && mission.state() == AP_Mission::MISSION_RUNNING) {
+        mission.stop();
+    }
+    // SmartRTL'den cikarken: tuketilmis ama varilmamis kirinti noktasini yola geri koy
+    // ve kutuphanenin kapsamli temizlik istegini iptal et (yoksa arka plan temizligi
+    // kalici olarak bloke kalir). ArduSub'in Mode tabaninda exit() sanal fonksiyonu
+    // olmadigi icin burasi tek dogru yer.
+    if (old_flightmode == &mode_smartrtl) {
+        mode_smartrtl.cikis_temizligi();
+    }
 #if HAL_MOUNT_ENABLED
         camera_mount.set_mode_to_default();
 #endif  // HAL_MOUNT_ENABLED

@@ -14,6 +14,13 @@ enum GuidedSubMode {
     Guided_Angle,
 };
 
+// AURA sig-su satih tavani. Tanim mode_auto.cpp'de; SmartRTL de kullanabilsin diye
+// dosya-statik olmaktan cikarildi. komut_u_m = bu bacagin komut ettigi dikey hedef
+// (U, yukari pozitif, m). terrain_mi = true ise komut edilen hedef DIKKATE ALINMAZ ve
+// sabit -0.30 m tavan uygulanir; bu, "hedef derinlik komut etmeyen" bacaklar
+// (terrain kurtarmasi, NAV_ATTITUDE_TIME, SmartRTL) icin dogru olan davranistir.
+void aura_satih_tavani_cekirdek(AC_PosControl *position_control, float komut_u_m, bool terrain_mi);
+
 // Auto modes
 enum AutoSubMode {
     Auto_WP,
@@ -22,7 +29,8 @@ enum AutoSubMode {
     Auto_NavGuided,
     Auto_Loiter,
     Auto_TerrainRecover,
-    Auto_Anchor          // AURA: drop anchor - lock the current point
+    Auto_Anchor,         // AURA: drop anchor - lock the current point
+    Auto_NavAttitudeTime // NAV_ATTITUDE_TIME - hold an attitude for N seconds
 };
 
 // RTL states
@@ -51,7 +59,8 @@ public:
         POSHOLD =      16,  // automatic position hold with manual override, with automatic throttle
         MANUAL =       19,  // Pass-through input with no stabilization
         MOTOR_DETECT = 20,  // Automatically detect motors orientation
-        SURFTRAK =     21   // Track distance above seafloor (hold range)
+        SURFTRAK =     21,  // Track distance above seafloor (hold range)
+        SMART_RTL =    22   // AURA: retrace the recorded path back to where we armed
         // Mode number 30 reserved for "offboard" for external/lua control.
     };
 
@@ -302,6 +311,63 @@ private:
 
 
 
+// AURA: Smart RTL - gelinen izi geri surerek eve don.
+//
+// AP_SmartRTL arac ilerledikce 3B kirinti noktalari biriktirir (NED metre, EKF
+// orijinine gore) ve bu mod onlari TERSTEN tuketir. Duz hat RTL'in aksine gelinen
+// yoldan doner: buz altinda, enkap icinde ya da kapali bir yapida tek guvenli
+// donus yolu budur.
+//
+// Copter'in SmartRTL'i INISLE biter; burada oyle bir sey yok. Rover'in sekli
+// alindi (StopAtHome): son noktada durur ve orada tutar. Ustune AURA'nin satih
+// tavani SERT olarak uygulanir (-0.30 m): son kirinti noktasi arm anindaki konum,
+// yani genellikle SATIH oldugu icin, tavansiz bir SmartRTL gorevin sonunda araci
+// yuzeye cikarirdi - bu fork'un acikca yasakladigi sey.
+// ModeGuided'dan turuyor, Mode'dan degil: otomatik yaw yardimcilari
+// (set_auto_yaw_mode / get_default_auto_yaw_mode / get_auto_heading) orada tanimli.
+// ModeAuto da tam olarak bu sebeple ayni tabani kullaniyor.
+class ModeSmartRtl : public ModeGuided
+{
+public:
+    using ModeGuided::ModeGuided;
+
+    bool init(bool ignore_checks) override;
+    void run() override;
+
+    bool requires_GPS() const override { return true; }
+    bool requires_altitude() const override { return true; }
+    bool allows_arming(bool from_gcs) const override { return false; }
+    bool is_autopilot() const override { return true; }
+
+    // 3 Hz zamanlayici gorevi: kirinti biriktirme
+    void save_position();
+
+    // moddan cikarken: tuketilmis ama henuz varilmamis noktayi geri koy
+    void cikis_temizligi();
+
+protected:
+    const char *name() const override { return "Smart RTL"; }
+    const char *name4() const override { return "SRTL"; }
+    Mode::Number number() const override { return Mode::Number::SMART_RTL; }
+
+private:
+    enum class Durum : uint8_t {
+        YOL_TEMIZLIGI,   // kutuphanenin kapsamli temizligi bitene kadar bekle
+        IZI_SUR,         // kirinti noktalarini tersten tuket
+        DERINLIKTE_TUT,  // son noktada, derinlikte istasyon tut
+    };
+
+    Durum durum;
+    Vector3p tuketilmis_nokta_ned_m;   // pop edilip henuz varilmamis nokta
+    bool tuketilmis_gecerli;
+    uint32_t son_basarili_pop_ms;
+
+    void yol_temizligi_kos();
+    void izi_sur_kos();
+    void tut_kos();
+    void wp_cikislarini_sur();
+};
+
 class ModeAuto : public ModeGuided
 {
 
@@ -319,8 +385,12 @@ public:
     bool auto_loiter_start();
     void auto_wp_start(const Vector3f& destination);
     void auto_wp_start(const Location& dest_loc);
-    void auto_circle_movetoedge_start(const Location &circle_center, float radius_m, bool ccw_turn);
+    void auto_circle_movetoedge_start(const Location &circle_center, float radius_m, float rate_degs);
     void auto_circle_start();
+    float aura_daire_dikey_hiz_ms() const;
+    float aura_daire_yaw_cd();
+    void auto_nav_attitude_time_start(const AP_Mission::Mission_Command& cmd);
+    uint32_t nav_attitude_time_start_ms() const { return nav_attitude_time.start_ms; }
     void auto_nav_guided_start();
     void set_auto_yaw_roi(const Location &roi_location);
     void set_auto_yaw_look_at_heading(float angle_deg, float turn_rate_dps, int8_t direction, uint8_t relative_angle);
@@ -335,6 +405,10 @@ protected:
     Mode::Number number() const override { return Mode::Number::AUTO; }
 
 private:
+    // AURA: gorev, ARM olana kadar baslatilmaz. init() bunu true yapar, run() arac
+    // arm oldugunda mission.start_or_resume() cagirip false'a ceker. Bkz. mode_auto.cpp.
+    bool gorev_arm_bekliyor = false;
+
     void auto_wp_run();
     void auto_circle_run();
     void auto_nav_guided_run();
@@ -342,6 +416,16 @@ private:
     // ROI); false keeps the stock behaviour where yaw is the pilot's rate stick only.
     void auto_loiter_run(bool honour_auto_yaw = false);
     void auto_terrain_recover_run();
+    void auto_nav_attitude_time_run();
+
+    // NAV_ATTITUDE_TIME durumu
+    struct {
+        float roll_deg = 0.0f;
+        float pitch_deg = 0.0f;
+        float yaw_deg = 0.0f;
+        float climb_rate_ms = 0.0f;
+        uint32_t start_ms = 0;
+    } nav_attitude_time;
     void auto_anchor_run();
 };
 
@@ -416,6 +500,9 @@ protected:
     const char *name4() const override { return "SURF"; }
     Mode::Number number() const override { return Mode::Number::SURFACE; }
     bool nobaro_mode;
+    // SURFMDSW "ayni mod" (SURFACE) derse satha varildiktan sonra true olur:
+    // artik tirmanma komut edilmez, derinlik SURFACE_DEPTH'e kilitlenir.
+    bool satihta_tut = false;
 };
 
 

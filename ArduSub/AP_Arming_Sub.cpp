@@ -139,6 +139,12 @@ bool AP_Arming_Sub::arm(AP_Arming::Method method, bool do_arming_checks)
     // finally actually arm the motors
     sub.motors.armed(true);
 
+    // AURA: SmartRTL yolunu buradan baslat. set_home() kirinti yolunu temizler ve
+    // ANLIK 3B konumu ilk nokta olarak yazar - yani "eve donus" arm edildigin yer
+    // demektir. AHRS'in ev noktasi DEGIL: ArduSub onu bilerek su yuzeyine tasiyor
+    // (commands.cpp), SmartRTL ise gercekten bulunulan noktayi ister.
+    sub.g2.smart_rtl.set_home(sub.position_ok());
+
 #if HAL_LOGGING_ENABLED
     // log flight mode in case it was changed while vehicle was disarmed
     AP::logger().Write_Mode((uint8_t)sub.control_mode, sub.control_mode_reason);

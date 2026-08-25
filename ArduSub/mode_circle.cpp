@@ -65,8 +65,15 @@ void ModeCircle::run()
     // set motors to full range
     motors.set_desired_spool_state(AP_Motors::DesiredSpoolState::THROTTLE_UNLIMITED);
 
-    // run circle controller
-    sub.failsafe_terrain_set_status(sub.circle_nav.update_cms());
+    // Run circle controller. Pilotun dikey talebi BURAYA verilir.
+    //
+    // Eskiden update_cms() argumansiz cagriliyor, dikey eksen ise asagida
+    // D_set_pos_target_from_climb_rate_cms() ile IKINCI KEZ suruluyordu. Her iki yol da
+    // AC_PosControl::input_vel_accel_D_m icinde update_pos_vel_accel() ile dikey hedefi
+    // bir dt ILERLETIR (AC_PosControl.cpp), yani hedef her dongude iki kez integre
+    // ediliyordu: derinlik hedefi istenenin ~2 kati hizla kayiyor ve jerk sekillendirici
+    // ayni tick icinde once 0'a, sonra pilotun talebine cekiliyordu. Tek cagri kalir.
+    sub.failsafe_terrain_set_status(sub.circle_nav.update_cms(target_climb_rate));
 
     ///////////////////////
     // update xy outputs //
@@ -85,7 +92,7 @@ void ModeCircle::run()
         attitude_control->input_euler_angle_roll_pitch_yaw_cd(channel_roll->get_control_in(), channel_pitch->get_control_in(), sub.circle_nav.get_yaw_cd(), true);
     }
 
-    // update altitude target and call position controller
-    position_control->D_set_pos_target_from_climb_rate_cms(target_climb_rate);
+    // Dikey hedef yukarida update_cms(target_climb_rate) icinde kuruldu; burada yalniz
+    // kontrolcu kosturulur (Copter'in ModeCircle'i da tam olarak boyle yapiyor).
     position_control->D_update_controller();
 }
