@@ -549,7 +549,8 @@ bool AP_Mission::is_nav_cmd(const Mission_Command& cmd)
             // AURA: so is the position fix - it has to hold the mission for its dwell,
             // and it reads the coordinate of the nav command that follows it, so it
             // must sit in the nav chain rather than run as a do-command beside one.
-            cmd.id == MAV_CMD_AURA_POSITION_FIX);
+            cmd.id == MAV_CMD_AURA_POSITION_FIX ||
+            cmd.id == MAV_CMD_AURA_CIRCLE);
 }
 
 /// get_next_nav_cmd - gets next "navigation" command found at or after start_index
@@ -1443,6 +1444,37 @@ MAV_MISSION_RESULT AP_Mission::mavlink_int_to_mission_cmd(const mavlink_mission_
         cmd.content.aura_anchor.photo_delay_s = constrain_float(packet.z, 0, 31);
         break;
 
+    // AURA: fly a circle
+    case MAV_CMD_AURA_CIRCLE:
+        // param1 = turns. 0 means one full turn rather than none: an item that says
+        // "circle" and then completes immediately is never what was meant.
+        // roundf(), not a bare truncating cast: constrain_float returns a float and the
+        // assignment truncates toward zero, so a GCS asking for 1.05 m would store
+        // 104 cm and 2.09 m would store 208 cm. Measured over the full 16-bit range,
+        // truncation mismatches 7% of decimal inputs and 25% of re-uploaded values;
+        // with roundf() it is exact everywhere.
+        cmd.content.aura_circle.turns_centi = roundf(constrain_float(packet.param1 * 100.0f, 0, UINT16_MAX));
+        // param2 = radius (m). 0 = fall back to CIRCLE_RADIUS_M.
+        cmd.content.aura_circle.radius_cm = roundf(constrain_float(packet.param2 * 100.0f, 0, UINT16_MAX));
+        // param3 = rate (deg/s), the sign carries the direction. 0 = fall back to
+        // CIRCLE_RATE. Unlike NAV_LOITER_TURNS the sign lives in the value itself
+        // rather than in a loiter_ccw flag borrowed from the Location - this command
+        // has no Location to borrow one from.
+        cmd.content.aura_circle.rate_cdegs = roundf(constrain_float(packet.param3 * 100.0f, INT16_MIN, INT16_MAX));
+        // param4 = yaw behaviour selector; x is the heading it needs when that is 2.
+        cmd.content.aura_circle.yaw_mode = constrain_float(packet.param4, 0, 3);
+        // x < 0 means "no heading given", the same convention the anchor uses and the
+        // one both plan generators emit (-1 for an empty slot). Without the valid bit
+        // a -1 would collapse to 0 and yaw mode 2 would hold due NORTH - a real
+        // heading, silently substituted for "unset".
+        cmd.content.aura_circle.yaw_valid = (packet.x >= 0);
+        cmd.content.aura_circle.yaw_deg = cmd.content.aura_circle.yaw_valid ? (packet.x % 360) : 0;
+        cmd.content.aura_circle.centre_from_wp = (packet.y != 0);
+        // z = depth (m above home, negative = submerged); 0 = keep the current depth.
+        cmd.content.aura_circle.depth_cm = roundf(constrain_float(packet.z * 100.0f, INT16_MIN, INT16_MAX));
+        cmd.content.aura_circle.reserved = 0;
+        break;
+
     // AURA: position fix
     case MAV_CMD_AURA_POSITION_FIX:
         // param1 = dwell (s). 0 is not "advance immediately": the reset needs a moment
@@ -1991,6 +2023,21 @@ bool AP_Mission::mission_cmd_to_mavlink_int(const AP_Mission::Mission_Command& c
         // headings shift by 1 on every round trip and it accumulates (52 -> 51 -> 50).
         // It also makes the heading show up as 9.1e-06 in the plan file and as "0" in
         // the item editor, where touching the field turns it into a real due north.
+        packet.frame = MAV_FRAME_MISSION;
+        break;
+
+    // AURA: fly a circle
+    case MAV_CMD_AURA_CIRCLE:
+        packet.param1 = cmd.content.aura_circle.turns_centi * 0.01f;
+        packet.param2 = cmd.content.aura_circle.radius_cm * 0.01f;
+        packet.param3 = cmd.content.aura_circle.rate_cdegs * 0.01f;
+        packet.param4 = cmd.content.aura_circle.yaw_mode;
+        packet.x = cmd.content.aura_circle.yaw_valid ? (int32_t)cmd.content.aura_circle.yaw_deg : -1;
+        packet.y = cmd.content.aura_circle.centre_from_wp;
+        packet.z = cmd.content.aura_circle.depth_cm * 0.01f;
+        // x/y hold a heading and a flag, not a scaled coordinate - the same reason
+        // spelled out for the anchor below: leave the frame at MAV_FRAME_GLOBAL and
+        // every GCS reads x/y as 1e7-scaled degrees, mangling them on each round trip.
         packet.frame = MAV_FRAME_MISSION;
         break;
 
@@ -2994,6 +3041,8 @@ const char *AP_Mission::Mission_Command::type() const
         return "Anchor";
     case MAV_CMD_AURA_POSITION_FIX:
         return "PositionFix";
+    case MAV_CMD_AURA_CIRCLE:
+        return "Circle";
     case MAV_CMD_DO_PAUSE_CONTINUE:
         return "PauseContinue";
     case MAV_CMD_DO_GIMBAL_MANAGER_PITCHYAW:

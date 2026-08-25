@@ -115,6 +115,7 @@ public:
     friend class ModeAcro;
     friend class ModeAlthold;
     friend class ModeSurftrak;
+    friend class ModeSmartRtl;
     friend class ModeGuided;
     friend class ModePoshold;
     friend class ModeAuto;
@@ -303,6 +304,12 @@ private:
     uint32_t posfix_start_ms;   // when the command started (the dwell counts from here)
     bool posfix_skipped;        // no waypoint to read, or the EKF refused -> pass through
     bool posfix_relocked;       // the hold has been re-established in the corrected frame
+
+    // AURA: MAV_CMD_AURA_CIRCLE state. NAV_LOITER_TURNS also runs through the same
+    // controller, so these are set for it too (yaw mode 0, turns from p1).
+    float    daire_tur_hedefi = 0.0f;  // turns still to complete
+    float    daire_yaw_cd = 0.0f;      // heading used by yaw modes 1 and 2 (centi-degrees)
+    uint8_t  daire_yaw_kip = 0;        // 0 = face centre, 1 = hold heading, 2 = fixed, 3 = tangent
 
     // Battery Sensors
     AP_BattMonitor battery{MASK_LOG_CURRENT,
@@ -497,7 +504,6 @@ private:
     bool set_mode(const uint8_t new_mode, const ModeReason reason) override;
     uint8_t get_mode() const override { return (uint8_t)control_mode; }
     void update_flight_mode();
-    void exit_mode(Mode::Number old_control_mode, Mode::Number new_control_mode);
     void notify_flight_mode();
     void read_inertia();
     void update_surface_and_bottom_detector();
@@ -555,8 +561,11 @@ private:
     void do_nav_wp(const AP_Mission::Mission_Command& cmd);
     void do_surface(const AP_Mission::Mission_Command& cmd);
     void do_RTL(void);
+    void aura_nav_guard_kur(uint32_t bekleme_s);
+    bool aura_nav_guard_doldu() const;
     void do_loiter_unlimited(const AP_Mission::Mission_Command& cmd);
     void do_circle(const AP_Mission::Mission_Command& cmd);
+    void do_aura_circle(const AP_Mission::Mission_Command& cmd);
     void do_loiter_time(const AP_Mission::Mission_Command& cmd);
 #if NAV_GUIDED
     void do_nav_guided_enable(const AP_Mission::Mission_Command& cmd);
@@ -577,6 +586,9 @@ private:
     bool verify_surface(const AP_Mission::Mission_Command& cmd);
     bool verify_RTL(void);
     bool verify_circle(const AP_Mission::Mission_Command& cmd);
+    bool verify_aura_circle(const AP_Mission::Mission_Command& cmd);
+    bool verify_nav_attitude_time(const AP_Mission::Mission_Command& cmd);
+    bool aura_sonraki_konumlu_wp(uint16_t index, Location &konum);
 #if NAV_GUIDED
     bool verify_nav_guided_enable(const AP_Mission::Mission_Command& cmd);
 #endif
@@ -657,6 +669,7 @@ private:
     ModeSurface mode_surface;
     ModeMotordetect mode_motordetect;
     ModeSurftrak mode_surftrak;
+    ModeSmartRtl mode_smartrtl;
 
     // Auto
     AutoSubMode auto_mode;   // controls which auto controller is run

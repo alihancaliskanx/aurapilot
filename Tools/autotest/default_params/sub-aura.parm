@@ -1053,3 +1053,13 @@ WP_SPD_UP              2.5
 WP_TER_MARGIN          1e+01
 WP_YAW_BEHAVIOR        4
 XTRACK_ANG_LIM         45
+
+# --- Smart RTL (mod 22): gelinen izi geri surerek eve donus -------------------
+# SRTL_ACCURACY kirinti noktalari arasindaki en kucuk aralik. Kutuphanenin
+# olcusu 3B ve IZOTROPTUR: budama, birbirine bu mesafe kadar yaklasan iki gecis
+# arasinda kestirme atar. Varsayilan 2.0 m bir AUV icin FAZLA KABA - 1.5 m
+# arayla iki derinlik katmaninda survey yapiliyorsa katmanlar arasi kestirme
+# atar ve donus izi gercekte gidilmemis bir yoldan gecer.
+SRTL_ACCURACY    0.5
+# 300 nokta x ~20 bayt = ~6 kB heap. Cube Orange+'ta sorun degil.
+SRTL_POINTS      300

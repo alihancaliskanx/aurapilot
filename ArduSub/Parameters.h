@@ -5,6 +5,7 @@
 #include <AP_Common/AP_Common.h>
 
 #include <AP_Arming/AP_Arming.h>
+#include <AP_SmartRTL/AP_SmartRTL.h>
 #include "actuators.h"
 // Global parameter class.
 //
@@ -247,6 +248,7 @@ public:
         k_param_pilot_speed_dn,
         k_param_rangefinder_signal_min,
         k_param_surftrak_depth,
+        k_param_surface_mode_switch,
         k_param_pilot_speed,
         k_param_failsafe_throttle,
         k_param_failsafe_throttle_value,
@@ -263,6 +265,7 @@ public:
 #if AP_RANGEFINDER_ENABLED
     AP_Int8         rangefinder_signal_min;     // minimum signal quality for good rangefinder readings
     AP_Float        surftrak_depth;             // surftrak will try to keep sub below this depth
+    AP_Int8         surface_mode_switch;        // mode to enter once SURFACE reaches the surface
 #endif
 
     AP_Int8         failsafe_leak;              // leak detection failsafe behavior
@@ -407,6 +410,9 @@ public:
 
     AP_Float surface_nobaro_thrust;
     Actuators actuators;
+
+    // AURA: Smart RTL - gelinen izi geri surerek eve don
+    AP_SmartRTL smart_rtl;
 
     // Used to track parameter conversions
     AP_Int8 param_conversion_increment;

@@ -139,6 +139,10 @@ void Sub::init_ardupilot()
 
     // initialise mission library
     mission.init();
+
+    // AURA: SmartRTL kirinti tamponunu ayir (SRTL_POINTS x ~20 bayt, heap).
+    // init() idempotent; SRTL_POINTS=0 ise sessizce devre disi kalir.
+    g2.smart_rtl.init();
 #if HAL_LOGGING_ENABLED
     mission.set_log_start_mission_item_bit(MASK_LOG_CMD);
 #endif

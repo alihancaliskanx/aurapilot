@@ -65,12 +65,28 @@ public:
     // Radius is constrained to AC_CIRCLE_RADIUS_MAX_M.
     void set_radius_m(float radius_m);
 
+    // Returns the RADIUS_M parameter itself, ignoring any radius set at runtime.
+    // get_radius_m() falls back to this parameter only while no runtime radius has
+    // been set; once one has, it keeps returning that one. A caller that means
+    // "the configured default", not "whatever the last circle used", needs this.
+    float get_radius_parm_m() const { return _radius_parm_m; }
+
     // Returns the configured circle turn rate in degrees per second from the RATE parameter.
     float get_rate_degs() const { return _rate_parm_degs; }
 
     // Returns the current angular velocity in degrees per second.
     // May be lower than the configured maximum due to ramp constraints.
     float get_rate_current() const { return degrees(_angular_vel_rads); }
+
+    // Returns the rate most recently handed to set_rate_degs() or init_*(), sign
+    // included (positive = clockwise, negative = counter-clockwise).
+    //
+    // This is NOT what get_rate_degs() returns. That one reads the RATE parameter, so a
+    // direction applied through set_rate_degs() cannot be read back through it. The
+    // classic misuse is init_*(centre, terrain, get_rate_degs()), which reads like
+    // "re-init with the rate I already set" but silently restores the parameter's sign
+    // and discards the caller's direction. Use this accessor for that round trip.
+    float get_rate_max_degs() const { return degrees(_rotation_rate_max_rads); }
 
     // Sets the target circle rate in degrees per second.
     // Positive values result in clockwise rotation; negative for counter-clockwise.
@@ -138,6 +154,11 @@ public:
     // Returns true if the mount ROI is fixed at the circle center.
     // See roi_at_center() for flag logic.
     bool roi_at_center() const { return (_options.get() & CircleOptions::ROI_AT_CENTER) != 0; }
+
+    // Returns true if get_yaw_* already carries the +/-90 deg offset that makes the
+    // vehicle face the direction of travel (CIRCLE_OPTIONS bit 1). A caller computing
+    // its own tangent heading has to know, or it applies the offset twice.
+    bool face_direction_of_travel() const { return (_options.get() & CircleOptions::FACE_DIRECTION_OF_TRAVEL) != 0; }
 
     // Sets rangefinder terrain offset (in centimeters) above EKF origin.
     // See set_rangefinder_terrain_U_m() for full details.

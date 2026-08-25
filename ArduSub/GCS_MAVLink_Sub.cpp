@@ -847,6 +847,7 @@ uint8_t GCS_MAVLINK_Sub::send_available_mode(uint8_t index) const
         &sub.mode_guided,
         &sub.mode_circle,
         &sub.mode_surface,
+        &sub.mode_smartrtl,
         &sub.mode_motordetect,
     };
 

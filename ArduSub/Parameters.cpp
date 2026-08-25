@@ -116,7 +116,7 @@ const AP_Param::Info Sub::var_info[] = {
     // @Param: FLTMODE1
     // @DisplayName: Flight Mode 1
     // @Description: Flight mode when pwm of Flightmode channel(FLTMODE_CH) is <= 1230
-    // @Values: 0:Stabilize,1:Acro,2:AltHold,3:Auto,4:Guided,7:Circle,9:Surface,16:PosHold,19:Manual,20:Motor Detect,21:SurfTrak
+    // @Values: 0:Stabilize,1:Acro,2:AltHold,3:Auto,4:Guided,7:Circle,9:Surface,16:PosHold,19:Manual,20:Motor Detect,21:SurfTrak,22:SmartRTL
     // @User: Standard
     GSCALAR(flight_mode1, "FLTMODE1",               (uint8_t)FLIGHT_MODE_1),
 
@@ -681,6 +681,13 @@ const AP_Param::Info Sub::var_info[] = {
     // @Units: cm
     // @User: Standard
     GSCALAR(surftrak_depth, "SURFTRAK_DEPTH", SURFTRAK_DEPTH_DEFAULT),
+
+    // @Param: SURFMDSW
+    // @DisplayName: Mode after surfacing
+    // @Description: Flight mode to enter once SURFACE mode has reached the surface (SURFACE_DEPTH). Set this to 9 (Surface) to stay in SURFACE mode instead: the vehicle then holds itself at SURFACE_DEPTH with balanced vertical thrust rather than continuing to command a climb, which keeps a negatively buoyant vehicle pinned at the surface without cavitating half-submerged thrusters. If the requested mode refuses to start (for example PosHold with no position estimate) the vehicle stays in SURFACE and holds, it does not keep climbing.
+    // @Values: 2:AltHold,9:Surface (stay and hold),16:PosHold,19:Manual,0:Stabilize,1:Acro
+    // @User: Standard
+    GSCALAR(surface_mode_switch, "SURFMDSW", (int8_t)Mode::Number::ALT_HOLD),
 #endif
 
 #if AP_TERRAIN_AVAILABLE
@@ -767,6 +774,10 @@ const AP_Param::GroupInfo ParametersG2::var_info[] = {
     // @Group: ACTUATOR
     // @Path: ../ArduSub/actuators.cpp
     AP_SUBGROUPINFO(actuators, "ACTUATOR", 23, ParametersG2, Actuators),
+
+    // @Group: SRTL_
+    // @Path: ../libraries/AP_SmartRTL/AP_SmartRTL.cpp
+    AP_SUBGROUPINFO(smart_rtl, "SRTL_", 25, ParametersG2, AP_SmartRTL),
 
     // Hidden param used as a flag for param conversion
     // This allows one time conversion while allowing user to flash between versions with and without converted params
