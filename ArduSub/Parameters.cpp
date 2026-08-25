@@ -116,7 +116,7 @@ const AP_Param::Info Sub::var_info[] = {
     // @Param: FLTMODE1
     // @DisplayName: Flight Mode 1
     // @Description: Flight mode when pwm of Flightmode channel(FLTMODE_CH) is <= 1230
-    // @Values: 0:Stabilize,1:Acro,2:AltHold,3:Auto,4:Guided,7:Circle,9:Surface,16:PosHold,19:Manual,20:Motor Detect,21:SurfTrak,22:SmartRTL
+    // @Values: 0:Stabilize,1:Acro,2:AltHold,3:Auto,4:Guided,7:Circle,9:Surface,16:PosHold,19:Manual,20:Motor Detect,21:SurfTrak,22:SmartRTL,23:Anchor
     // @User: Standard
     GSCALAR(flight_mode1, "FLTMODE1",               (uint8_t)FLIGHT_MODE_1),
 
@@ -688,6 +688,29 @@ const AP_Param::Info Sub::var_info[] = {
     // @Values: 2:AltHold,9:Surface (stay and hold),16:PosHold,19:Manual,0:Stabilize,1:Acro
     // @User: Standard
     GSCALAR(surface_mode_switch, "SURFMDSW", (int8_t)Mode::Number::ALT_HOLD),
+
+    // @Param: ANCHOR_TIME
+    // @DisplayName: Anchor hold time
+    // @Description: How long ANCHOR mode holds the anchor point before switching to ANCHOR_MDSW. 0 means hold for ever. The clock starts when ANCHOR mode is entered, not when the vehicle settles on the point. Ignored entirely when ANCHOR_MDSW selects ANCHOR itself.
+    // @Units: s
+    // @Range: 0 86400
+    // @User: Standard
+    GSCALAR(anchor_time, "ANCHOR_TIME", 0),
+
+    // @Param: ANCHOR_MDSW
+    // @DisplayName: Mode after anchoring
+    // @Description: Flight mode to enter when ANCHOR_TIME expires or the anchor data stops arriving. Set this to 23 (Anchor) to stay in ANCHOR instead: the vehicle then holds its last commanded point indefinitely and ANCHOR_TIME is ignored. If the requested mode refuses to start (for example PosHold with no position estimate) the vehicle keeps holding rather than falling out of position control.
+    // @Values: 23:Anchor (stay and hold),2:AltHold,16:PosHold,9:Surface,19:Manual,0:Stabilize
+    // @User: Standard
+    GSCALAR(anchor_mode_switch, "ANCHOR_MDSW", (int8_t)Mode::Number::ANCHOR),
+
+    // @Param: ANCHOR_DTIM
+    // @DisplayName: Anchor data timeout
+    // @Description: How long ANCHOR mode waits without a new anchor-data message (SET_POSITION_TARGET_GLOBAL_INT) before treating the link as lost and switching to ANCHOR_MDSW. The clock only starts once the FIRST anchor-data message has arrived: a stream that never started is not a stream that was cut, and the vehicle simply holds where it entered the mode. 0 disables the timeout entirely. The default tolerates two missed messages at 1 Hz.
+    // @Units: s
+    // @Range: 0 60
+    // @User: Standard
+    GSCALAR(anchor_data_timeout, "ANCHOR_DTIM", 3.0f),
 #endif
 
 #if AP_TERRAIN_AVAILABLE

@@ -60,7 +60,8 @@ public:
         MANUAL =       19,  // Pass-through input with no stabilization
         MOTOR_DETECT = 20,  // Automatically detect motors orientation
         SURFTRAK =     21,  // Track distance above seafloor (hold range)
-        SMART_RTL =    22   // AURA: retrace the recorded path back to where we armed
+        SMART_RTL =    22,  // AURA: retrace the recorded path back to where we armed
+        ANCHOR =       23   // AURA: hold a commanded point, fed live over MAVLink
         // Mode number 30 reserved for "offboard" for external/lua control.
     };
 
@@ -366,6 +367,59 @@ private:
     void izi_sur_kos();
     void tut_kos();
     void wp_cikislarini_sur();
+};
+
+// AURA: ANCHOR - disaridan surekli beslenen bir noktayi tut.
+//
+// Gorevdeki demir item'inin (MAV_CMD_AURA_ANCHOR 31010) UCUS MODU karsiligi. O
+// item YERINDE DURUYOR ve silinmedi; ikisi ayni istasyon-tutma fizigini kullanir
+// ama farkli seyler icindir: item bir gorev adimidir ve parametrelerini plandan
+// alir, bu mod ise disaridan (GCS / Jetson) canli beslenir.
+//
+// "Demir verisi": SET_POSITION_TARGET_GLOBAL_INT (msg 86), lat/lon/alt + yaw.
+// Sadece bir kez degil, SUREKLI gonderilir; susarsa (ANCHOR_DTIM) mod baglantiyi
+// kopmus sayar ve ANCHOR_MDSW'e gecer.
+//
+// Foto/deklansor BILEREK YOKTUR: gorev demiri onu icinde tasir cunku orada
+// do-komut kuyrugu sirasi garanti degildi; burada operator ne zaman isterse
+// kendi komutunu gonderir.
+class ModeAnchor : public ModeGuided
+{
+public:
+    using ModeGuided::ModeGuided;
+
+    bool init(bool ignore_checks) override;
+    void run() override;
+
+    bool requires_GPS() const override { return true; }
+    bool requires_altitude() const override { return true; }
+    // Bir tutma modunda arm etmek mesru: operator araci suya birakip once ANCHOR'a
+    // alip sonra arm edebilir. (SmartRTL false diyor cunku o bir kacis manevrasi.)
+    bool allows_arming(bool from_gcs) const override { return true; }
+    bool is_autopilot() const override { return true; }
+    // ModeGuided'dan miras: guided_limit vb. GUIDED'e ozgu; bu mod GUIDED degil.
+    bool in_guided_mode() const override { return false; }
+
+    // Demir verisi girisi (GCS_MAVLink_Sub.cpp'den cagrilir).
+    // konum_neu_cm : EKF orijinine gore hedef (NEU, cm)
+    // yaw_var / yaw_cd : bas acisi verildi mi, verildiyse santiderece
+    bool demir_verisi_al(const Vector3f &konum_neu_cm, bool yaw_var, float yaw_cd);
+
+protected:
+    const char *name() const override { return "Anchor"; }
+    const char *name4() const override { return "ANCH"; }
+    Mode::Number number() const override { return Mode::Number::ANCHOR; }
+
+private:
+    uint32_t giris_ms;          // moda girildigi an (ANCHOR_TIME buradan sayilir)
+    uint32_t son_veri_ms;       // son demir verisinin geldigi an; 0 = hic gelmedi
+    bool     mod_degistirildi;  // ANCHOR_MDSW'e bir kez gecmeyi denedik
+    bool     satihta_tut;       // hedef derinlik SURFACE_DEPTH'ten sig -> derinligi kilitle
+    float    hedef_d_m;         // kilitlenecek derinlik (D, asagi pozitif, m)
+
+    void nokta_kilitle(const Vector3f &konum_neu_cm);
+    void cikis_kosulu_denetle();
+    void kontrolcuyu_sur();
 };
 
 class ModeAuto : public ModeGuided

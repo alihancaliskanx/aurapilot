@@ -678,10 +678,11 @@ void GCS_MAVLINK_Sub::handle_message(const mavlink_message_t &msg)
         mavlink_set_position_target_global_int_t packet;
         mavlink_msg_set_position_target_global_int_decode(&msg, &packet);
 
-        // exit if vehicle is not in Guided, Auto-Guided, or Depth Hold modes
+        // exit if vehicle is not in Guided, Auto-Guided, Depth Hold or Anchor modes
         if ((sub.control_mode != Mode::Number::GUIDED)
             && !(sub.control_mode == Mode::Number::AUTO && sub.auto_mode == Auto_NavGuided)
-            && !(sub.control_mode == Mode::Number::ALT_HOLD)) {
+            && !(sub.control_mode == Mode::Number::ALT_HOLD)
+            && !(sub.control_mode == Mode::Number::ANCHOR)) {
             break;
         }
 
@@ -689,11 +690,11 @@ void GCS_MAVLINK_Sub::handle_message(const mavlink_message_t &msg)
         bool pos_ignore      = packet.type_mask & MAVLINK_SET_POS_TYPE_MASK_POS_IGNORE;
         bool vel_ignore      = packet.type_mask & MAVLINK_SET_POS_TYPE_MASK_VEL_IGNORE;
         bool acc_ignore      = packet.type_mask & MAVLINK_SET_POS_TYPE_MASK_ACC_IGNORE;
+        bool yaw_ignore      = packet.type_mask & MAVLINK_SET_POS_TYPE_MASK_YAW_IGNORE;
 
         /*
          * for future use:
          * bool force           = packet.type_mask & MAVLINK_SET_POS_TYPE_MASK_FORCE;
-         * bool yaw_ignore      = packet.type_mask & MAVLINK_SET_POS_TYPE_MASK_YAW_IGNORE;
          * bool yaw_rate_ignore = packet.type_mask & MAVLINK_SET_POS_TYPE_MASK_YAW_RATE_IGNORE;
          */
 
@@ -723,6 +724,24 @@ void GCS_MAVLINK_Sub::handle_message(const mavlink_message_t &msg)
             if (!loc.get_vector_from_origin_NEU_cm(pos_neu_cm)) {
                 break;
             }
+        }
+
+        // AURA: ANCHOR modunun "demir verisi". Bu mod bir hiz/ivme hedefi kabul
+        // etmez - tutulacak NOKTA ve (istege bagli) BAS ACISI ister. Bu yuzden
+        // asagidaki GUIDED dallanmasindan once, ayri ele alinir.
+        //
+        // yaw: msg 86 alanini radyan tasiyor. Bu isleyici onu eskiden TAMAMEN
+        // yok sayiyordu ("for future use"); ArduCopter'in ayni mesajdaki deseni
+        // ornek alindi. Goreli yaw KASITLI OLARAK YOK: kuresel bir cercevede
+        // "govdeye gore yaw" tanimsizdir (Copter da global mesajda kullanmaz).
+        if (sub.control_mode == Mode::Number::ANCHOR) {
+            if (pos_ignore) {
+                // Nokta yoksa tutulacak bir demir de yok.
+                break;
+            }
+            sub.mode_anchor.demir_verisi_al(pos_neu_cm, !yaw_ignore,
+                                            degrees(packet.yaw) * 100.0f);
+            break;
         }
 
         if (!pos_ignore && !vel_ignore && acc_ignore) {
@@ -848,6 +867,7 @@ uint8_t GCS_MAVLINK_Sub::send_available_mode(uint8_t index) const
         &sub.mode_circle,
         &sub.mode_surface,
         &sub.mode_smartrtl,
+        &sub.mode_anchor,
         &sub.mode_motordetect,
     };
 

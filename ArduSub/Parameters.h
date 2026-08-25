@@ -248,10 +248,25 @@ public:
         k_param_pilot_speed_dn,
         k_param_rangefinder_signal_min,
         k_param_surftrak_depth,
-        k_param_surface_mode_switch,
         k_param_pilot_speed,
         k_param_failsafe_throttle,
         k_param_failsafe_throttle_value,
+
+        // YENI PARAMETRELER BURAYA, ACIK NUMARAYLA VE SONA EKLENIR.
+        //
+        // Bu enum'un degeri, parametrenin EEPROM ANAHTARIDIR. Araya bir giris
+        // sokmak kendinden SONRAKI her parametrenin anahtarini kaydirir; ayarli
+        // bir araca yeni firmware yuklendiginde eski degerler YANLIS parametreye
+        // okunur. Bir kez oldu: k_param_surface_mode_switch once surftrak_depth
+        // ile pilot_speed arasina konmustu ve PILOT_SPEED / FS_THR_ENABLE /
+        // FS_THR_VALUE'yu +1 kaydirdi - FS_THR_ENABLE'in cop okumasi demek.
+        // Acik numaralar, ayni hatanin sessizce tekrarlanmasini engeller.
+        k_param_surface_mode_switch = 245,   // SURFMDSW
+        k_param_anchor_time = 246,           // ANCHOR_TIME
+        k_param_anchor_mode_switch = 247,    // ANCHOR_MDSW
+        k_param_anchor_data_timeout = 248,   // ANCHOR_DTIM
+        // 249-256 bos
+
         k_param_vehicle = 257, // vehicle common block of parameters
         k_param__gcs = 258,
     };
@@ -266,6 +281,11 @@ public:
     AP_Int8         rangefinder_signal_min;     // minimum signal quality for good rangefinder readings
     AP_Float        surftrak_depth;             // surftrak will try to keep sub below this depth
     AP_Int8         surface_mode_switch;        // mode to enter once SURFACE reaches the surface
+
+    // AURA: ANCHOR ucus modu
+    AP_Int32        anchor_time;                // s, 0 = hold for ever
+    AP_Int8         anchor_mode_switch;         // mode to enter when the hold ends
+    AP_Float        anchor_data_timeout;        // s of silence before the anchor data counts as lost, 0 = never
 #endif
 
     AP_Int8         failsafe_leak;              // leak detection failsafe behavior

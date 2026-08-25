@@ -116,6 +116,7 @@ public:
     friend class ModeAlthold;
     friend class ModeSurftrak;
     friend class ModeSmartRtl;
+    friend class ModeAnchor;
     friend class ModeGuided;
     friend class ModePoshold;
     friend class ModeAuto;
@@ -670,6 +671,7 @@ private:
     ModeMotordetect mode_motordetect;
     ModeSurftrak mode_surftrak;
     ModeSmartRtl mode_smartrtl;
+    ModeAnchor mode_anchor;
 
     // Auto
     AutoSubMode auto_mode;   // controls which auto controller is run
