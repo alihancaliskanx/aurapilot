@@ -422,6 +422,15 @@ public:
     // Sets desired horizontal acceleration in m/s².
     void set_accel_desired_NE_mss(const Vector2f &accel_desired_ne_mss) { _accel_desired_ned_mss.xy() = accel_desired_ne_mss; }
 
+    // Sets the vertical acceleration feed-forward in m/s^2, NED (positive down).
+    // The NE counterpart above already existed; a caller that clamps the vertical
+    // target has to be able to clamp its feed-forward too, or the clamp is fought
+    // by a feed-forward that still points the other way.
+    void set_accel_desired_D_mss(float accel_desired_d_mss) { _accel_desired_ned_mss.z = accel_desired_d_mss; }
+
+    // Returns the vertical acceleration feed-forward in m/s^2, NED (positive down).
+    float get_accel_desired_D_mss() const { return _accel_desired_ned_mss.z; }
+
     // Returns target NED acceleration in m/s².
     const Vector3f& get_accel_target_NED_mss() const { return _accel_target_ned_mss; }
 
