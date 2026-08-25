@@ -49,6 +49,20 @@ void aura_satih_tavani_cekirdek(AC_PosControl *position_control,
     const float hedef_u_m = position_control->get_pos_desired_U_m() + ofset_u_m;
     if (hedef_u_m > tavan_u_m) {
         position_control->set_pos_desired_U_m(tavan_u_m - ofset_u_m);
+
+        // Konum hedefini kirpmak TEK BASINA yetmiyordu: AC_WPNav yorungeyi konum,
+        // HIZ ve IVME olarak birlikte yaziyor (set_pos_vel_accel_NED_m) ve
+        // D_update_controller ikisini de hedefe EKLIYOR. Tavan devredeyken P terimi
+        // hedefi -0.30 m'de tutarken ileri-besleme hala YUKARI komut ediyor, arac da
+        // konum hatasi ileri-beslemeyi yenene kadar tavanin USTUNE tasiyordu.
+        // Kirpilmis yorungenin yukari bileseni artik gecerli degil, sifirlanir.
+        // (Asagi yonlu ileri-beslemeye dokunulmaz: o zaten tavandan uzaklastiriyor.)
+        if (is_negative(position_control->get_vel_desired_NED_ms().z)) {
+            position_control->set_vel_desired_D_ms(0.0f);
+        }
+        if (is_negative(position_control->get_accel_desired_D_mss())) {
+            position_control->set_accel_desired_D_mss(0.0f);
+        }
     }
 }
 

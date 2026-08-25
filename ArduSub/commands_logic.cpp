@@ -370,6 +370,10 @@ void Sub::do_surface(const AP_Mission::Mission_Command& cmd)
 
     // Go to wp location
     mode_auto.auto_wp_start(target_location);
+
+    // Satha cikis da ulasilamayabilir (negatif yuzerlik, aga takilma, buz).
+    // Guard olmadan gorev orada kalici olarak park ederdi.
+    aura_nav_guard_kur(0);
 }
 
 void Sub::do_RTL()
@@ -431,6 +435,15 @@ void Sub::do_loiter_unlimited(const AP_Mission::Mission_Command& cmd)
 
     // start way point navigator and provide it the desired location
     mode_auto.auto_wp_start(target_loc);
+
+    // NAV_LOITER_UNLIM'in verify'i HIC true donmez - komutun anlami bu. Ama bu,
+    // bu dosyadaki tek kacissiz nav komutu demek: diger her sey ya tamamlanir ya
+    // da guard tavaniyla dusar. GCS'siz bir gorevde (FS_GCS_ENABLE=0) modu
+    // degistirecek operator de yoktur; arac batarya failsafe'ine kadar bekler.
+    // Davranis DEGISTIRILMEDI (komutun tanimi bu), ama sessiz kalmasi yanlis:
+    // QGC'nin "Loiter" deseni bunu operator planina kolayca sokuyor.
+    gcs().send_text(MAV_SEVERITY_WARNING,
+                    "LoiterUnlim: mission holds here until the mode is changed");
 }
 
 // do_circle - initiate moving in a circle
@@ -468,6 +481,9 @@ void Sub::do_circle(const AP_Mission::Mission_Command& cmd)
 
     // move to edge of circle (verify_circle) will ensure we begin circling once we reach the edge
     mode_auto.auto_circle_movetoedge_start(circle_center, circle_radius_m, rate_degs);
+
+    // Kenara gitme bacagi icin guard (AURA_CIRCLE'da da ayni).
+    aura_nav_guard_kur(0);
 }
 
 // AURA: bir index'ten itibaren, konum TASIYAN ilk nav komutunu bul.
@@ -575,6 +591,10 @@ void Sub::do_loiter_time(const AP_Mission::Mission_Command& cmd)
     // setup loiter timer
     loiter_time     = 0;
     loiter_time_max = cmd.p1;     // units are (seconds)
+
+    // verify_nav_wp ile ayni gerekce: reached_wp_destination() tek yonlu bir
+    // mandal, ulasilamayan bir noktada gorev kalici olarak park ederdi.
+    aura_nav_guard_kur(loiter_time_max);
 }
 
 #if NAV_GUIDED
@@ -800,6 +820,12 @@ bool Sub::verify_nav_wp(const AP_Mission::Mission_Command& cmd)
 // verify_surface - returns true if surface procedure has been completed
 bool Sub::verify_surface(const AP_Mission::Mission_Command& cmd)
 {
+    if (aura_nav_guard_doldu()) {
+        gcs().send_text(MAV_SEVERITY_WARNING, "Surface: guard time expired, %.2fm depth",
+                        (double)(sub.current_loc.alt * 0.01f));
+        return true;
+    }
+
     bool retval = false;
 
     switch (auto_surface_state) {
@@ -811,6 +837,11 @@ bool Sub::verify_surface(const AP_Mission::Mission_Command& cmd)
                 Location target_location(cmd.content.location.lat, cmd.content.location.lng, 0, Location::AltFrame::ABOVE_HOME);
 
                 mode_auto.auto_wp_start(target_location);
+
+                // Guard'i IKINCI bacak icin yeniden kur. do_surface'te kurulan
+                // butce yalniz ilk bacagin (konuma gitme) uzunlugundan hesaplanmisti;
+                // derin bir tirmanis onu asabilir ve gorev sebepsiz dusrdu.
+                aura_nav_guard_kur(0);
 
                 // advance to next state
                 auto_surface_state = AUTO_SURFACE_STATE_ASCEND;
@@ -858,6 +889,12 @@ bool Sub::verify_loiter_unlimited()
 // verify_loiter_time - check if we have loitered long enough
 bool Sub::verify_loiter_time()
 {
+    if (aura_nav_guard_doldu()) {
+        gcs().send_text(MAV_SEVERITY_WARNING, "LoiterTime: guard time expired, %.2fm short",
+                        (double)(wp_nav.get_wp_distance_to_destination_cm() * 0.01f));
+        return true;
+    }
+
     // return immediately if we haven't reached our destination
     if (!wp_nav.reached_wp_destination()) {
         return false;
@@ -877,6 +914,12 @@ bool Sub::verify_circle(const AP_Mission::Mission_Command& cmd)
 {
     // check if we've reached the edge
     if (auto_mode == Auto_CircleMoveToEdge) {
+        if (aura_nav_guard_doldu()) {
+            gcs().send_text(MAV_SEVERITY_WARNING, "Circle #%i: guard expired, starting anyway",
+                            cmd.index);
+            mode_auto.auto_circle_start();
+            return false;
+        }
         if (wp_nav.reached_wp_destination()) {
             // Buradaki circle_center hesabi OLU KODDU: degisken kuruluyor, sartli olarak
             // .xy()'si eziliyor ve hicbir yerde kullanilmadan kapsam disina cikiyordu.
