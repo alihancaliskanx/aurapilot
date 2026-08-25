@@ -123,8 +123,25 @@ void AP_Baro_SITL::_timer()
     float T = KELVIN_TO_C(T_K);
     temperature_adjustment(p, T);
 #else
+    // Depth is measured from the WATER SURFACE, and in this simulator the water
+    // surface is at HOME altitude - not at AMSL 0.
+    //
+    // This model used to pass -sim_alt, i.e. it placed the surface at AMSL 0. Every
+    // other part of the sub sim measures from home: buoyancy from position.z
+    // (SIM_Submarine.cpp), the sea floor 50 m below home, the rangefinder likewise.
+    // Only the barometer disagreed, and the consequences were silent and total.
+    // p(h) = 101325 - 1024*9.80665*h, so any home above ~10.1 m AMSL produced a
+    // NEGATIVE absolute pressure; AP_Baro::update() then sees a non-positive stored
+    // ground pressure, re-seeds GND_PRESS from the live sample on every single cycle
+    // (AP_Baro.cpp), and reported depth is pinned at exactly 0.00 m for ever. The
+    // vehicle still dives - it dives BLIND, with the GCS reading zero, until it hits
+    // the simulated sea floor. Measured at home 584 m: a 3.9 m descent (+38.9 kPa)
+    // showed as -0.05 m.
+    // Real hardware is unaffected: a Bar30 always reads a positive absolute pressure,
+    // and ArduSub's depth is purely differential.
+    const float derinlik_m = _sitl->state.home.alt * 0.01f - sim_alt;
     float rho, delta, theta;
-    AP_Baro::SimpleUnderWaterAtmosphere(-sim_alt * 0.001f, rho, delta, theta);
+    AP_Baro::SimpleUnderWaterAtmosphere(derinlik_m * 0.001f, rho, delta, theta);
     float p = SSL_AIR_PRESSURE * delta;
     float T = KELVIN_TO_C(SSL_AIR_TEMPERATURE * theta);
 #endif
