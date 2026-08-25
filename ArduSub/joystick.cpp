@@ -200,6 +200,9 @@ void Sub::handle_jsbutton_press(uint8_t _button, bool shift, bool held)
     case JSButton::button_function_t::k_mode_smart_rtl:
         set_mode(Mode::Number::SMART_RTL, ModeReason::RC_COMMAND);
         break;
+    case JSButton::button_function_t::k_mode_anchor:
+        set_mode(Mode::Number::ANCHOR, ModeReason::RC_COMMAND);
+        break;
 #if HAL_MOUNT_ENABLED
     case JSButton::button_function_t::k_mount_center:
         camera_mount.set_angle_target(0, 0, 0, false);

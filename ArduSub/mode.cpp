@@ -45,6 +45,10 @@ Mode *Sub::mode_from_mode_num(const Mode::Number mode)
     case Mode::Number::SMART_RTL:
         ret = &mode_smartrtl;
         break;
+
+    case Mode::Number::ANCHOR:
+        ret = &mode_anchor;
+        break;
     case Mode::Number::POSHOLD:
         ret = &mode_poshold;
         break;
