@@ -280,13 +280,18 @@ public:
 #if AP_RANGEFINDER_ENABLED
     AP_Int8         rangefinder_signal_min;     // minimum signal quality for good rangefinder readings
     AP_Float        surftrak_depth;             // surftrak will try to keep sub below this depth
+#endif
+
+    // SURFACE ve ANCHOR modlarinin parametreleri: rangefinder'a BAGLI DEGIL, o yuzden
+    // yukaridaki #if AP_RANGEFINDER_ENABLED blogunun DISINDA. Bir sure blogun icindeydiler
+    // ve mode_surface.cpp / mode_anchor.cpp onlari kosulsuz kullandigi icin rangefinder'siz
+    // bir yapilandirmada DERLEME HATASI veriyorlardi.
     AP_Int8         surface_mode_switch;        // mode to enter once SURFACE reaches the surface
 
     // AURA: ANCHOR ucus modu
     AP_Int32        anchor_time;                // s, 0 = hold for ever
     AP_Int8         anchor_mode_switch;         // mode to enter when the hold ends
     AP_Float        anchor_data_timeout;        // s of silence before the anchor data counts as lost, 0 = never
-#endif
 
     AP_Int8         failsafe_leak;              // leak detection failsafe behavior
     AP_Int8         failsafe_gcs;               // ground station failsafe behavior
