@@ -87,6 +87,14 @@ bool Sub::start_command(const AP_Mission::Mission_Command& cmd)
         mode_auto.auto_nav_attitude_time_start(cmd);
         break;
 
+    case AP_Mission::MAV_CMD_AURA_GUIDED_MISSION:  // 31025 bacagi dis bilgisayara ver
+        do_aura_guided_mission(cmd);
+        break;
+
+    case AP_Mission::MAV_CMD_AURA_GUIDED_SETUP:    // 31030 guided overlay ac/kapa (DO)
+        do_aura_guided_setup(cmd);
+        break;
+
     case MAV_CMD_NAV_LOITER_TIME:              // 19
         do_loiter_time(cmd);
         break;
@@ -225,6 +233,9 @@ bool Sub::verify_command(const AP_Mission::Mission_Command& cmd)
     case MAV_CMD_NAV_ATTITUDE_TIME:
         return verify_nav_attitude_time(cmd);
 
+    case AP_Mission::MAV_CMD_AURA_GUIDED_MISSION:
+        return verify_aura_guided_mission(cmd);
+
     case MAV_CMD_NAV_LOITER_TIME:
         return verify_loiter_time();
 
@@ -272,6 +283,9 @@ bool Sub::verify_command(const AP_Mission::Mission_Command& cmd)
     // "Skipping invalid cmd #207" basiliyordu. Copter'da da tam olarak bu sebeple
     // yalniz verify tarafinda bir case var.
     case MAV_CMD_DO_FENCE_ENABLE:           // 207
+    // Guided overlay ac/kapa: bir DO komutu, gorevi bloklamaz. Buraya EKLENMEZSE
+    // her dongude "Skipping invalid cmd #31030" basardi.
+    case AP_Mission::MAV_CMD_AURA_GUIDED_SETUP:
         return true;
 
     default:
@@ -793,6 +807,18 @@ void Sub::do_guided_limits(const AP_Mission::Mission_Command& cmd)
 // verify_nav_wp - check if we have reached the next way point
 bool Sub::verify_nav_wp(const AP_Mission::Mission_Command& cmd)
 {
+    // Guided overlay devredeyken bu bacak ILERLEMEZ.
+    //
+    // Bu bir suslemek degil, ZORUNLULUK: overlay Guided_WP alt-modunu kullaniyor ve
+    // o alt-mod wp_nav'in hedefini GUIDED noktasiyla degistiriyor. Dolayisiyla
+    // reached_wp_destination() guided hedefine gore mandallanir ve asagidaki kontrol
+    // "gercek waypoint'e varildi" sanip gorevi ilerletirdi - arac oraya hic
+    // gitmemisken. mission.update() overlay sirasinda da kosmaya devam ettigi icin
+    // bu kacinilmazdi.
+    if (guided_overlay_etkin) {
+        return false;
+    }
+
     // AURA: guard ceiling first - the mission must never park on a waypoint the
     // vehicle cannot reach (see do_nav_wp for the budget). reached_wp_destination()
     // is a one-way latch on a 3D WPNAV_RADIUS test, so without this there is no
@@ -873,6 +899,83 @@ bool Sub::verify_surface(const AP_Mission::Mission_Command& cmd)
 
     // true is returned if we've successfully surfaced
     return retval;
+}
+
+// AURA: guided verisi son esik_ms icinde geldi mi?
+bool Sub::guided_verisi_taze(uint32_t esik_ms) const
+{
+    if (guided_veri_ms == 0) {
+        return false;       // hic gelmedi
+    }
+    return (AP_HAL::millis() - guided_veri_ms) <= esik_ms;
+}
+
+// AURA: MAV_CMD_AURA_GUIDED_MISSION (31025)
+//
+// Bacagi dis bilgisayara devreder ve o SUSUNCA gorevi surdurur.
+//
+// NAV_GUIDED_ENABLE (92) de kontrolu devrediyor ama TEK cikisi bir
+// DO_GUIDED_LIMITS ihlali: onune limit konmazsa gorev o item'da SONSUZA KADAR
+// park eder ve veri kesilmesi diye bir cikis hic yoktur. Dalis ortasinda yeniden
+// baslayabilen bir yardimci bilgisayar icin bu yanlis basarisizlik bicimi.
+void Sub::do_aura_guided_mission(const AP_Mission::Mission_Command& cmd)
+{
+    // Auto_NavGuided alt-modu: MOD DEGISMEZ, arac AUTO'da kalir. Mod degistirmek
+    // gorevi dondururdu - verify_command_callback AUTO disinda daima false doner.
+    mode_auto.auto_nav_guided_start();
+
+    // Sayaci bu andan baslat. Damgayi SIFIRLAMIYORUZ: item'dan hemen once gelmis
+    // bir setpoint de gecerli sayilmali.
+    nav_wp_start_ms = AP_HAL::millis();
+
+    gcs().send_text(MAV_SEVERITY_INFO, "GuidedMission: waiting for setpoints");
+}
+
+bool Sub::verify_aura_guided_mission(const AP_Mission::Mission_Command& cmd)
+{
+    const uint32_t simdi = AP_HAL::millis();
+    const uint32_t esik_ms = cmd.content.aura_guided_mission.timeout_ms > 0
+                             ? cmd.content.aura_guided_mission.timeout_ms
+                             : 3000;
+
+    // Azami sure tavani (0 = tavan yok).
+    const uint16_t azami_s = cmd.content.aura_guided_mission.max_time_s;
+    if (azami_s > 0 && (simdi - nav_wp_start_ms) > (uint32_t)azami_s * 1000UL) {
+        gcs().send_text(MAV_SEVERITY_INFO, "GuidedMission: max time, moving on");
+        return true;
+    }
+
+    // Veri sessizligi. Sayac ILK VERIDEN degil ITEM GIRISINDEN isler: bu bir gorev
+    // item'i, dis bilgisayar hic konusmazsa gorevin orada asili kalmasi kabul
+    // edilemez. Operator esigi buna gore secmeli (yardimci bilgisayarin konusmaya
+    // baslamasi icin gereken sureden buyuk).
+    const uint32_t referans = (guided_veri_ms > nav_wp_start_ms) ? guided_veri_ms : nav_wp_start_ms;
+    if ((simdi - referans) > esik_ms) {
+        gcs().send_text(MAV_SEVERITY_INFO, "GuidedMission: setpoints stopped, moving on");
+        return true;
+    }
+    return false;
+}
+
+// AURA: MAV_CMD_AURA_GUIDED_SETUP (31030) - guided overlay'i ac/kapa.
+//
+// Bir DO komutu: gorevi bloklamaz, yalnizca bayrak kurar. Gorev listesinde
+// sonradan kapali bir tanesi konursa o andan itibaren devre disi kalir, tekrar
+// acik konursa yeniden calisir - yani dinamik.
+void Sub::do_aura_guided_setup(const AP_Mission::Mission_Command& cmd)
+{
+    guided_overlay_acik = (cmd.content.aura_guided_setup.enable != 0);
+    guided_overlay_zaman_ms = cmd.content.aura_guided_setup.timeout_ms > 0
+                              ? cmd.content.aura_guided_setup.timeout_ms
+                              : 3000;
+
+    if (!guided_overlay_acik && guided_overlay_etkin) {
+        // Kapatildi ama su an devredeydi: bacagi derhal geri ver.
+        mode_auto.guided_overlay_birak();
+    }
+
+    gcs().send_text(MAV_SEVERITY_INFO, "GuidedSetup: overlay %s",
+                    guided_overlay_acik ? "on" : "off");
 }
 
 // NAV_ATTITUDE_TIME: sure dolunca tamamlanir.

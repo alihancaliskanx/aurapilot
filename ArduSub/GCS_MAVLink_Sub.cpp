@@ -678,11 +678,21 @@ void GCS_MAVLINK_Sub::handle_message(const mavlink_message_t &msg)
         mavlink_set_position_target_global_int_t packet;
         mavlink_msg_set_position_target_global_int_decode(&msg, &packet);
 
+        // AURA: guided overlay silahliysa AUTO'nun HERHANGI bir alt-modunda da
+        // dinleriz. Yoksa tavuk-yumurta olurdu: overlay ancak veri TAZE iken
+        // devreye giriyor, veri damgasi ise yalniz kabul edilen mesajlarda basiliyor;
+        // kapi AUTO+Auto_WP'yi reddettigi surece damga hic basilmaz ve overlay hic
+        // devreye giremezdi.
+        const bool aura_overlay_bekliyor = (sub.control_mode == Mode::Number::AUTO)
+                                           && sub.guided_overlay_acik
+                                           && (sub.auto_mode != Auto_NavGuided);
+
         // exit if vehicle is not in Guided, Auto-Guided, Depth Hold or Anchor modes
         if ((sub.control_mode != Mode::Number::GUIDED)
             && !(sub.control_mode == Mode::Number::AUTO && sub.auto_mode == Auto_NavGuided)
             && !(sub.control_mode == Mode::Number::ALT_HOLD)
-            && !(sub.control_mode == Mode::Number::ANCHOR)) {
+            && !(sub.control_mode == Mode::Number::ANCHOR)
+            && !aura_overlay_bekliyor) {
             break;
         }
 
@@ -724,6 +734,25 @@ void GCS_MAVLINK_Sub::handle_message(const mavlink_message_t &msg)
             if (!loc.get_vector_from_origin_NEU_cm(pos_neu_cm)) {
                 break;
             }
+        }
+
+        // AURA: disaridan bir setpoint kabul edildi - damgayi bas.
+        //
+        // Bu damga "guided verisi akiyor mu" sorusunun TEK guvenilir kaynagi:
+        // ModeGuided'in update_time_ms'i konum yolunda hic guncellenmiyor
+        // (guided_set_destination(Vector3f) ona dokunmuyor). AURA_GUIDED_MISSION ve
+        // AURA_GUIDED_SETUP kararlarini buna dayandiriyor.
+        sub.guided_veri_ms = AP_HAL::millis();
+
+        // Overlay henuz DEVREDE DEGILKEN setpoint UYGULANMAZ, yalnizca damgalanir.
+        //
+        // Uygulasaydik guided_set_destination Guided_WP alt-modunu baslatir ve
+        // wp_nav'in gorev hedefini overlay daha onu SAKLAYAMADAN ezerdi; bacak geri
+        // verilemez hale gelirdi. Bir sonraki dongude guided_overlay_degerlendir()
+        // bacagi saklayip Auto_NavGuided'a gecirir ve bundan sonraki setpoint'ler
+        // normal yoldan uygulanir. Maliyeti tek mesajlik gecikme.
+        if (aura_overlay_bekliyor) {
+            break;
         }
 
         // AURA: ANCHOR modunun "demir verisi". Bu mod bir hiz/ivme hedefi kabul

@@ -550,7 +550,12 @@ bool AP_Mission::is_nav_cmd(const Mission_Command& cmd)
             // and it reads the coordinate of the nav command that follows it, so it
             // must sit in the nav chain rather than run as a do-command beside one.
             cmd.id == MAV_CMD_AURA_POSITION_FIX ||
-            cmd.id == MAV_CMD_AURA_CIRCLE);
+            cmd.id == MAV_CMD_AURA_CIRCLE ||
+            // Guided mission bir NAV komutudur: sirasi gelince gorevi BLOKLAR ve
+            // ancak veri kesilince (ya da azami sure dolunca) ilerler.
+            // MAV_CMD_AURA_GUIDED_SETUP BILEREK burada YOK - o bir DO komutu, gorevi
+            // bloklamamali, yalnizca bayrak kurmali.
+            cmd.id == MAV_CMD_AURA_GUIDED_MISSION);
 }
 
 /// get_next_nav_cmd - gets next "navigation" command found at or after start_index
@@ -1445,6 +1450,24 @@ MAV_MISSION_RESULT AP_Mission::mavlink_int_to_mission_cmd(const mavlink_mission_
         break;
 
     // AURA: fly a circle
+    case MAV_CMD_AURA_GUIDED_MISSION:
+        // param1 = veri sessizligi zaman asimi (s). 0 = 3 s varsayilani: bir gorev
+        // item'i olarak sonsuza kadar beklemek yanlis, ama sifir da "hemen vazgec"
+        // olmamali.
+        cmd.content.aura_guided_mission.timeout_ms =
+            roundf(constrain_float(packet.param1 * 1000.0f, 0, UINT16_MAX));
+        // param2 = azami sure (s). 0 = tavan yok; veri akmaya devam ettigi surece
+        // bacak surer.
+        cmd.content.aura_guided_mission.max_time_s =
+            roundf(constrain_float(packet.param2, 0, UINT16_MAX));
+        break;
+
+    case MAV_CMD_AURA_GUIDED_SETUP:
+        cmd.content.aura_guided_setup.enable = (packet.param1 > 0.5f) ? 1 : 0;
+        cmd.content.aura_guided_setup.timeout_ms =
+            roundf(constrain_float(packet.param2 * 1000.0f, 0, UINT16_MAX));
+        break;
+
     case MAV_CMD_AURA_CIRCLE:
         // param1 = turns. 0 means one full turn rather than none: an item that says
         // "circle" and then completes immediately is never what was meant.
@@ -2027,6 +2050,19 @@ bool AP_Mission::mission_cmd_to_mavlink_int(const AP_Mission::Mission_Command& c
         break;
 
     // AURA: fly a circle
+    case MAV_CMD_AURA_GUIDED_MISSION:
+        packet.param1 = cmd.content.aura_guided_mission.timeout_ms * 0.001f;
+        packet.param2 = cmd.content.aura_guided_mission.max_time_s;
+        // x/y/z kullanilmiyor; frame soylenmezse GCS onlari 1e7-olcekli derece sanar.
+        packet.frame = MAV_FRAME_MISSION;
+        break;
+
+    case MAV_CMD_AURA_GUIDED_SETUP:
+        packet.param1 = cmd.content.aura_guided_setup.enable;
+        packet.param2 = cmd.content.aura_guided_setup.timeout_ms * 0.001f;
+        packet.frame = MAV_FRAME_MISSION;
+        break;
+
     case MAV_CMD_AURA_CIRCLE:
         packet.param1 = cmd.content.aura_circle.turns_centi * 0.01f;
         packet.param2 = cmd.content.aura_circle.radius_cm * 0.01f;
@@ -3043,6 +3079,10 @@ const char *AP_Mission::Mission_Command::type() const
         return "PositionFix";
     case MAV_CMD_AURA_CIRCLE:
         return "Circle";
+    case MAV_CMD_AURA_GUIDED_MISSION:
+        return "GuidedMission";
+    case MAV_CMD_AURA_GUIDED_SETUP:
+        return "GuidedSetup";
     case MAV_CMD_DO_PAUSE_CONTINUE:
         return "PauseContinue";
     case MAV_CMD_DO_GIMBAL_MANAGER_PITCHYAW:
