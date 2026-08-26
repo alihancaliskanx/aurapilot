@@ -35,10 +35,10 @@ void ModeSurface::run()
         return;
     }
 
-    // Motorlari tam aralia al. Bu satir YOKTU ve spool durumu YAPISKANDIR
-    // (AP_Motors::armed() ona dokunmaz): SURFACE'te disarm edilip tekrar arm edilen
-    // bir arac, yukaridaki dalin yazdigi GROUND_IDLE'da kaliyor ve AP_Motors6DOF tum
-    // iticilere 1500 PWM basiyordu - arac ARM, satha cikmasi beklenirken itki SIFIR.
+    // Give the motors their full range. This line WAS MISSING and the spool state is
+    // STICKY (AP_Motors::armed() does not touch it): a vehicle disarmed and re-armed in
+    // SURFACE stayed in the GROUND_IDLE written by the branch above and AP_Motors6DOF
+    // drove 1500 PWM to every thruster - ARMED, thrust ZERO, while meant to be surfacing.
     motors.set_desired_spool_state(AP_Motors::DesiredSpoolState::THROTTLE_UNLIMITED);
 
     // If no barometer is available, use the surface_nobaro_thrust parameter to set the throttle output
@@ -74,16 +74,16 @@ void ModeSurface::run()
         attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw_cd(target_roll, target_pitch, target_yaw_rate);
 
         if (satihta_tut) {
-            // DENGELI DIKEY ITKI: tirmanma hizi komut etmek yerine derinlik hedefi
-            // SURFACE_DEPTH'e KAPALI CEVRIM kilitlenir. Fark onemli:
-            //   - surekli tirmanma komutu, arac zaten satihtayken hedefi sonsuza
-            //     kadar yukari surukler, iticiler yarim suyun disinda kalip
-            //     kavitasyon yapar ve bosuna akim ceker;
-            //   - derinlik hedefi kilitlenince pozisyon kontrolcusu tam da aracin
-            //     yuzerliginin gerektirdigi kadar itki uretir. Negatif yuzerlikli
-            //     bir aracta bu surekli hafif bir yukari itkidir (yani "dengeli"),
-            //     notr yuzerlikte ise neredeyse sifirdir.
-            float hedef_d_m = -(float)g.surface_depth * 0.01f;   // D (asagi pozitif), m
+            // BALANCED VERTICAL THRUST: instead of commanding a climb rate, the depth
+            // target is locked to SURFACE_DEPTH in CLOSED LOOP. The difference matters:
+            //   - a continuous climb command drags the target upward forever once the
+            //     vehicle is already at the surface; the thrusters end up half out of
+            //     the water, cavitate and draw current for nothing;
+            //   - with the depth target locked, the position controller produces exactly
+            //     the thrust the vehicle's buoyancy calls for. On a negatively buoyant
+            //     vehicle that is a steady slight upward thrust (hence "balanced"), and
+            //     at neutral buoyancy it is close to zero.
+            float hedef_d_m = -(float)g.surface_depth * 0.01f;   // D (down positive), m
             float hiz_d_ms = 0.0f;
             position_control->input_pos_vel_accel_D_m(hedef_d_m, hiz_d_ms, 0.0f);
         } else {

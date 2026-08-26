@@ -312,21 +312,21 @@ private:
     float    daire_yaw_cd = 0.0f;      // heading used by yaw modes 1 and 2 (centi-degrees)
     uint8_t  daire_yaw_kip = 0;        // 0 = face centre, 1 = hold heading, 2 = fixed, 3 = tangent
 
-    // AURA: disaridan gelen guided setpoint'inin zaman damgasi.
+    // AURA: timestamp of the guided setpoint arriving from outside.
     //
-    // ModeGuided'in kendi update_time_ms'i BU IS ICIN KULLANILAMAZ: dosya-statik
-    // (disaridan okunamaz) ve daha kotusu, msg 86'nin KONUM yolunu besleyen
-    // guided_set_destination(Vector3f) onu HIC guncellemiyor. Yani "veri geliyor mu"
-    // sorusuna oradan dogru cevap alinamaz. Damga isleyicide, setpoint kabul edildigi
-    // anda basilir.
+    // ModeGuided's own update_time_ms CANNOT BE USED FOR THIS JOB: it is file-static
+    // (not readable from outside) and, worse, guided_set_destination(Vector3f), which
+    // feeds the POSITION path of msg 86, does NOT update it at all. So it cannot answer
+    // the question "is data arriving" correctly. The stamp is taken in the handler, at
+    // the moment the setpoint is accepted.
     uint32_t guided_veri_ms = 0;
 
-    // AURA: guided overlay (MAV_CMD_AURA_GUIDED_SETUP) durumu
-    bool     guided_overlay_acik = false;      // item ile kuruldu mu
-    uint32_t guided_overlay_zaman_ms = 0;      // veri sessizlik esigi
-    bool     guided_overlay_etkin = false;     // su an AUTO bacaginin ustune yaziyor mu
-    Vector3f guided_overlay_wp_neu_cm;         // overlay'e girerken saklanan WP hedefi
-    uint32_t guided_overlay_giris_ms = 0;      // overlay'e girildigi an (guard saatini kaydirmak icin)
+    // AURA: guided overlay (MAV_CMD_AURA_GUIDED_SETUP) state
+    bool     guided_overlay_acik = false;      // was it set up by an item
+    uint32_t guided_overlay_zaman_ms = 0;      // data silence threshold
+    bool     guided_overlay_etkin = false;     // is it overriding the AUTO leg right now
+    Vector3f guided_overlay_wp_neu_cm;         // the WP target saved when entering the overlay
+    uint32_t guided_overlay_giris_ms = 0;      // when the overlay was entered (to shift the guard clock)
 
     // Battery Sensors
     AP_BattMonitor battery{MASK_LOG_CURRENT,

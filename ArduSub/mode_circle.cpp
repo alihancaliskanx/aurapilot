@@ -65,14 +65,14 @@ void ModeCircle::run()
     // set motors to full range
     motors.set_desired_spool_state(AP_Motors::DesiredSpoolState::THROTTLE_UNLIMITED);
 
-    // Run circle controller. Pilotun dikey talebi BURAYA verilir.
+    // Run circle controller. The pilot's vertical demand is fed in HERE.
     //
-    // Eskiden update_cms() argumansiz cagriliyor, dikey eksen ise asagida
-    // D_set_pos_target_from_climb_rate_cms() ile IKINCI KEZ suruluyordu. Her iki yol da
-    // AC_PosControl::input_vel_accel_D_m icinde update_pos_vel_accel() ile dikey hedefi
-    // bir dt ILERLETIR (AC_PosControl.cpp), yani hedef her dongude iki kez integre
-    // ediliyordu: derinlik hedefi istenenin ~2 kati hizla kayiyor ve jerk sekillendirici
-    // ayni tick icinde once 0'a, sonra pilotun talebine cekiliyordu. Tek cagri kalir.
+    // It used to call update_cms() with no argument while the vertical axis was driven a
+    // SECOND TIME below with D_set_pos_target_from_climb_rate_cms(). Both paths ADVANCE the
+    // vertical target by one dt through update_pos_vel_accel() inside
+    // AC_PosControl::input_vel_accel_D_m (AC_PosControl.cpp), so the target was integrated
+    // twice every loop: the depth target drifted at ~2x the requested rate and the jerk shaper
+    // was pulled first to 0 and then to the pilot's demand in the same tick. One call is left.
     sub.failsafe_terrain_set_status(sub.circle_nav.update_cms(target_climb_rate));
 
     ///////////////////////
@@ -92,7 +92,7 @@ void ModeCircle::run()
         attitude_control->input_euler_angle_roll_pitch_yaw_cd(channel_roll->get_control_in(), channel_pitch->get_control_in(), sub.circle_nav.get_yaw_cd(), true);
     }
 
-    // Dikey hedef yukarida update_cms(target_climb_rate) icinde kuruldu; burada yalniz
-    // kontrolcu kosturulur (Copter'in ModeCircle'i da tam olarak boyle yapiyor).
+    // The vertical target was set up above inside update_cms(target_climb_rate); here only
+    // the controller is run (Copter's ModeCircle does exactly the same thing).
     position_control->D_update_controller();
 }

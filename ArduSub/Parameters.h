@@ -252,20 +252,20 @@ public:
         k_param_failsafe_throttle,
         k_param_failsafe_throttle_value,
 
-        // YENI PARAMETRELER BURAYA, ACIK NUMARAYLA VE SONA EKLENIR.
+        // NEW PARAMETERS GO HERE, WITH AN EXPLICIT NUMBER AND APPENDED AT THE END.
         //
-        // Bu enum'un degeri, parametrenin EEPROM ANAHTARIDIR. Araya bir giris
-        // sokmak kendinden SONRAKI her parametrenin anahtarini kaydirir; ayarli
-        // bir araca yeni firmware yuklendiginde eski degerler YANLIS parametreye
-        // okunur. Bir kez oldu: k_param_surface_mode_switch once surftrak_depth
-        // ile pilot_speed arasina konmustu ve PILOT_SPEED / FS_THR_ENABLE /
-        // FS_THR_VALUE'yu +1 kaydirdi - FS_THR_ENABLE'in cop okumasi demek.
-        // Acik numaralar, ayni hatanin sessizce tekrarlanmasini engeller.
+        // The value of this enum is the parameter's EEPROM KEY. Inserting an entry
+        // in the middle shifts the key of every parameter AFTER it; when new firmware
+        // is loaded onto a configured vehicle the old values are read into the WRONG
+        // parameter. It happened once: k_param_surface_mode_switch was first put
+        // between surftrak_depth and pilot_speed and shifted PILOT_SPEED /
+        // FS_THR_ENABLE / FS_THR_VALUE by +1 - i.e. FS_THR_ENABLE reading garbage.
+        // Explicit numbers stop the same mistake being repeated silently.
         k_param_surface_mode_switch = 245,   // SURFMDSW
         k_param_anchor_time = 246,           // ANCHOR_TIME
         k_param_anchor_mode_switch = 247,    // ANCHOR_MDSW
         k_param_anchor_data_timeout = 248,   // ANCHOR_DTIM
-        // 249-256 bos
+        // 249-256 free
 
         k_param_vehicle = 257, // vehicle common block of parameters
         k_param__gcs = 258,
@@ -282,13 +282,13 @@ public:
     AP_Float        surftrak_depth;             // surftrak will try to keep sub below this depth
 #endif
 
-    // SURFACE ve ANCHOR modlarinin parametreleri: rangefinder'a BAGLI DEGIL, o yuzden
-    // yukaridaki #if AP_RANGEFINDER_ENABLED blogunun DISINDA. Bir sure blogun icindeydiler
-    // ve mode_surface.cpp / mode_anchor.cpp onlari kosulsuz kullandigi icin rangefinder'siz
-    // bir yapilandirmada DERLEME HATASI veriyorlardi.
+    // Parameters of the SURFACE and ANCHOR modes: they are NOT TIED to the rangefinder, so
+    // they sit OUTSIDE the #if AP_RANGEFINDER_ENABLED block above. For a while they were
+    // inside that block and, because mode_surface.cpp / mode_anchor.cpp use them
+    // unconditionally, they caused a COMPILE ERROR in a build without a rangefinder.
     AP_Int8         surface_mode_switch;        // mode to enter once SURFACE reaches the surface
 
-    // AURA: ANCHOR ucus modu
+    // AURA: ANCHOR flight mode
     AP_Int32        anchor_time;                // s, 0 = hold for ever
     AP_Int8         anchor_mode_switch;         // mode to enter when the hold ends
     AP_Float        anchor_data_timeout;        // s of silence before the anchor data counts as lost, 0 = never
@@ -436,7 +436,7 @@ public:
     AP_Float surface_nobaro_thrust;
     Actuators actuators;
 
-    // AURA: Smart RTL - gelinen izi geri surerek eve don
+    // AURA: Smart RTL - return home by retracing the track already travelled
     AP_SmartRTL smart_rtl;
 
     // Used to track parameter conversions

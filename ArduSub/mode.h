@@ -14,11 +14,11 @@ enum GuidedSubMode {
     Guided_Angle,
 };
 
-// AURA sig-su satih tavani. Tanim mode_auto.cpp'de; SmartRTL de kullanabilsin diye
-// dosya-statik olmaktan cikarildi. komut_u_m = bu bacagin komut ettigi dikey hedef
-// (U, yukari pozitif, m). terrain_mi = true ise komut edilen hedef DIKKATE ALINMAZ ve
-// sabit -0.30 m tavan uygulanir; bu, "hedef derinlik komut etmeyen" bacaklar
-// (terrain kurtarmasi, NAV_ATTITUDE_TIME, SmartRTL) icin dogru olan davranistir.
+// AURA shallow-water surface ceiling. The definition is in mode_auto.cpp; it was taken out
+// of file-static scope so that SmartRTL can use it too. komut_u_m = the vertical target this
+// leg commands (U, up positive, m). If terrain_mi is true the commanded target is IGNORED and
+// a fixed -0.30 m ceiling is applied; that is the right behaviour for legs that "do not
+// command a target depth" (terrain recovery, NAV_ATTITUDE_TIME, SmartRTL).
 void aura_satih_tavani_cekirdek(AC_PosControl *position_control, float komut_u_m, bool terrain_mi);
 
 // Auto modes
@@ -312,21 +312,21 @@ private:
 
 
 
-// AURA: Smart RTL - gelinen izi geri surerek eve don.
+// AURA: Smart RTL - return home by retracing the track already travelled.
 //
-// AP_SmartRTL arac ilerledikce 3B kirinti noktalari biriktirir (NED metre, EKF
-// orijinine gore) ve bu mod onlari TERSTEN tuketir. Duz hat RTL'in aksine gelinen
-// yoldan doner: buz altinda, enkap icinde ya da kapali bir yapida tek guvenli
-// donus yolu budur.
+// AP_SmartRTL accumulates 3D breadcrumb points as the vehicle moves (NED metres,
+// relative to the EKF origin) and this mode consumes them BACKWARDS. Unlike a
+// straight-line RTL it returns along the path travelled: under ice, inside a wreck or
+// in a closed structure that is the only safe way back.
 //
-// Copter'in SmartRTL'i INISLE biter; burada oyle bir sey yok. Rover'in sekli
-// alindi (StopAtHome): son noktada durur ve orada tutar. Ustune AURA'nin satih
-// tavani SERT olarak uygulanir (-0.30 m): son kirinti noktasi arm anindaki konum,
-// yani genellikle SATIH oldugu icin, tavansiz bir SmartRTL gorevin sonunda araci
-// yuzeye cikarirdi - bu fork'un acikca yasakladigi sey.
-// ModeGuided'dan turuyor, Mode'dan degil: otomatik yaw yardimcilari
-// (set_auto_yaw_mode / get_default_auto_yaw_mode / get_auto_heading) orada tanimli.
-// ModeAuto da tam olarak bu sebeple ayni tabani kullaniyor.
+// Copter's SmartRTL ends with a LANDING; there is no such thing here. Rover's shape was
+// taken (StopAtHome): it stops at the last point and holds there. On top of that AURA's
+// surface ceiling is applied HARD (-0.30 m): because the last breadcrumb point is the
+// position at the moment of arming, i.e. usually the SURFACE, a SmartRTL without a ceiling
+// would surface the vehicle at the end of the mission - what this fork explicitly forbids.
+// It derives from ModeGuided, not from Mode: the automatic yaw helpers
+// (set_auto_yaw_mode / get_default_auto_yaw_mode / get_auto_heading) are defined there.
+// ModeAuto uses the same base for exactly this reason.
 class ModeSmartRtl : public ModeGuided
 {
 public:
@@ -340,10 +340,10 @@ public:
     bool allows_arming(bool from_gcs) const override { return false; }
     bool is_autopilot() const override { return true; }
 
-    // 3 Hz zamanlayici gorevi: kirinti biriktirme
+    // 3 Hz scheduler task: breadcrumb accumulation
     void save_position();
 
-    // moddan cikarken: tuketilmis ama henuz varilmamis noktayi geri koy
+    // on leaving the mode: put the popped but not-yet-reached point back
     void cikis_temizligi();
 
 protected:
@@ -353,13 +353,13 @@ protected:
 
 private:
     enum class Durum : uint8_t {
-        YOL_TEMIZLIGI,   // kutuphanenin kapsamli temizligi bitene kadar bekle
-        IZI_SUR,         // kirinti noktalarini tersten tuket
-        DERINLIKTE_TUT,  // son noktada, derinlikte istasyon tut
+        YOL_TEMIZLIGI,   // wait until the library's thorough cleanup is finished
+        IZI_SUR,         // consume the breadcrumb points backwards
+        DERINLIKTE_TUT,  // station-keep at the last point, at depth
     };
 
     Durum durum;
-    Vector3p tuketilmis_nokta_ned_m;   // pop edilip henuz varilmamis nokta
+    Vector3p tuketilmis_nokta_ned_m;   // point popped but not yet reached
     bool tuketilmis_gecerli;
     uint32_t son_basarili_pop_ms;
 
@@ -369,20 +369,20 @@ private:
     void wp_cikislarini_sur();
 };
 
-// AURA: ANCHOR - disaridan surekli beslenen bir noktayi tut.
+// AURA: ANCHOR - hold a point that is fed continuously from outside.
 //
-// Gorevdeki demir item'inin (MAV_CMD_AURA_ANCHOR 31010) UCUS MODU karsiligi. O
-// item YERINDE DURUYOR ve silinmedi; ikisi ayni istasyon-tutma fizigini kullanir
-// ama farkli seyler icindir: item bir gorev adimidir ve parametrelerini plandan
-// alir, bu mod ise disaridan (GCS / Jetson) canli beslenir.
+// The FLIGHT MODE counterpart of the mission anchor item (MAV_CMD_AURA_ANCHOR 31010).
+// That item IS STILL IN PLACE and was not removed; the two use the same station-keeping
+// physics but exist for different things: the item is a mission step and takes its
+// parameters from the plan, while this mode is fed live from outside (GCS / Jetson).
 //
-// "Demir verisi": SET_POSITION_TARGET_GLOBAL_INT (msg 86), lat/lon/alt + yaw.
-// Sadece bir kez degil, SUREKLI gonderilir; susarsa (ANCHOR_DTIM) mod baglantiyi
-// kopmus sayar ve ANCHOR_MDSW'e gecer.
+// "Anchor data": SET_POSITION_TARGET_GLOBAL_INT (msg 86), lat/lon/alt + yaw.
+// It is sent CONTINUOUSLY, not just once; if it goes quiet (ANCHOR_DTIM) the mode counts
+// the link as lost and switches to ANCHOR_MDSW.
 //
-// Foto/deklansor BILEREK YOKTUR: gorev demiri onu icinde tasir cunku orada
-// do-komut kuyrugu sirasi garanti degildi; burada operator ne zaman isterse
-// kendi komutunu gonderir.
+// Photo/shutter is DELIBERATELY ABSENT: the mission anchor carries it inside itself
+// because there the do-command queue ordering was not guaranteed; here the operator
+// sends his own command whenever he wants it.
 class ModeAnchor : public ModeGuided
 {
 public:
@@ -393,16 +393,16 @@ public:
 
     bool requires_GPS() const override { return true; }
     bool requires_altitude() const override { return true; }
-    // Bir tutma modunda arm etmek mesru: operator araci suya birakip once ANCHOR'a
-    // alip sonra arm edebilir. (SmartRTL false diyor cunku o bir kacis manevrasi.)
+    // Arming in a holding mode is legitimate: the operator can put the vehicle in the water,
+    // switch to ANCHOR first and then arm. (SmartRTL says false because it is an escape manoeuvre.)
     bool allows_arming(bool from_gcs) const override { return true; }
     bool is_autopilot() const override { return true; }
-    // ModeGuided'dan miras: guided_limit vb. GUIDED'e ozgu; bu mod GUIDED degil.
+    // Inherited from ModeGuided: guided_limit etc. are specific to GUIDED; this mode is not GUIDED.
     bool in_guided_mode() const override { return false; }
 
-    // Demir verisi girisi (GCS_MAVLink_Sub.cpp'den cagrilir).
-    // konum_neu_cm : EKF orijinine gore hedef (NEU, cm)
-    // yaw_var / yaw_cd : bas acisi verildi mi, verildiyse santiderece
+    // Anchor data input (called from GCS_MAVLink_Sub.cpp).
+    // konum_neu_cm : target relative to the EKF origin (NEU, cm)
+    // yaw_var / yaw_cd : whether a heading was given, and if so in centidegrees
     bool demir_verisi_al(const Vector3f &konum_neu_cm, bool yaw_var, float yaw_cd);
 
 protected:
@@ -411,15 +411,15 @@ protected:
     Mode::Number number() const override { return Mode::Number::ANCHOR; }
 
 private:
-    uint32_t giris_ms = 0;          // sayaclarin basladigi an (ARM ile birlikte)
-    uint32_t son_veri_ms = 0;       // son demir verisinin geldigi an; 0 = hic gelmedi
-    uint32_t son_deneme_ms = 0;     // ANCHOR_MDSW'e en son ne zaman gecmeye calistik
-    uint32_t son_uyari_ms = 0;      // reddedilme uyarisi en son ne zaman basildi
-    bool     yeniden_kilitle = false; // disarm'dan cikildi -> demir noktasi geri yazilmali
-    bool     hedef_var = false;     // kilitli bir nokta var mi
-    bool     satihta_tut = false;   // hedef derinlik SURFACE_DEPTH'ten sig
-    float    hedef_d_m = 0.0f;      // kilitli derinlik (D, asagi pozitif, m)
-    Vector3p hedef_ned_m;           // kilitli nokta (NED, m, EKF orijinine gore)
+    uint32_t giris_ms = 0;          // when the counters started (together with ARM)
+    uint32_t son_veri_ms = 0;       // when the last anchor data arrived; 0 = never arrived
+    uint32_t son_deneme_ms = 0;     // when we last tried to switch to ANCHOR_MDSW
+    uint32_t son_uyari_ms = 0;      // when the refusal warning was last printed
+    bool     yeniden_kilitle = false; // came out of disarm -> anchor point must be written back
+    bool     hedef_var = false;     // is there a locked point
+    bool     satihta_tut = false;   // target depth is shallower than SURFACE_DEPTH
+    float    hedef_d_m = 0.0f;      // locked depth (D, positive down, m)
+    Vector3p hedef_ned_m;           // locked point (NED, m, relative to the EKF origin)
 
     void hedefi_uygula(const Vector3p &istenen_ned_m, bool zorla);
     void nokta_kilitle(const Vector3f &konum_neu_cm);
@@ -466,8 +466,8 @@ protected:
     Mode::Number number() const override { return Mode::Number::AUTO; }
 
 private:
-    // AURA: gorev, ARM olana kadar baslatilmaz. init() bunu true yapar, run() arac
-    // arm oldugunda mission.start_or_resume() cagirip false'a ceker. Bkz. mode_auto.cpp.
+    // AURA: the mission is not started until ARM. init() sets this true, and run() calls
+    // mission.start_or_resume() and clears it to false once the vehicle is armed. See mode_auto.cpp.
     bool gorev_arm_bekliyor = false;
 
     void auto_wp_run();
@@ -479,7 +479,7 @@ private:
     void auto_terrain_recover_run();
     void auto_nav_attitude_time_run();
 
-    // NAV_ATTITUDE_TIME durumu
+    // NAV_ATTITUDE_TIME state
     struct {
         float roll_deg = 0.0f;
         float pitch_deg = 0.0f;
@@ -561,8 +561,8 @@ protected:
     const char *name4() const override { return "SURF"; }
     Mode::Number number() const override { return Mode::Number::SURFACE; }
     bool nobaro_mode;
-    // SURFMDSW "ayni mod" (SURFACE) derse satha varildiktan sonra true olur:
-    // artik tirmanma komut edilmez, derinlik SURFACE_DEPTH'e kilitlenir.
+    // Becomes true after the surface is reached if SURFMDSW says "the same mode" (SURFACE):
+    // no climb is commanded any more, the depth is locked to SURFACE_DEPTH.
     bool satihta_tut = false;
 };
 

@@ -139,10 +139,10 @@ bool AP_Arming_Sub::arm(AP_Arming::Method method, bool do_arming_checks)
     // finally actually arm the motors
     sub.motors.armed(true);
 
-    // AURA: SmartRTL yolunu buradan baslat. set_home() kirinti yolunu temizler ve
-    // ANLIK 3B konumu ilk nokta olarak yazar - yani "eve donus" arm edildigin yer
-    // demektir. AHRS'in ev noktasi DEGIL: ArduSub onu bilerek su yuzeyine tasiyor
-    // (commands.cpp), SmartRTL ise gercekten bulunulan noktayi ister.
+    // AURA: start the SmartRTL path here. set_home() clears the breadcrumb trail and
+    // writes the CURRENT 3D position as the first point - so "return home" means the
+    // place you armed at. NOT the AHRS home point: ArduSub deliberately moves that to
+    // the water surface (commands.cpp), while SmartRTL wants the point actually occupied.
     sub.g2.smart_rtl.set_home(sub.position_ok());
 
 #if HAL_LOGGING_ENABLED
