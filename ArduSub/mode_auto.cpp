@@ -100,6 +100,13 @@ bool ModeAuto::init(bool ignore_checks) {
     // clear guided limits
     guided_limit_clear();
 
+    // Guided overlay'i AUTO'ya her girişte KAPAT. Gerekcesi guided_limit_clear ile
+    // ayni: kontrol otoritesini devreden bir ayar, operatorun yaptigi bir mod
+    // degisikliginden sagligiyla cikmamali. Plan overlay'i istiyorsa
+    // MAV_CMD_AURA_GUIDED_SETUP item'i onu yeniden acar.
+    sub.guided_overlay_acik = false;
+    sub.guided_overlay_etkin = false;
+
     // Gorev BURADA baslatilmaz - arac arm olana kadar beklenir (run() icinde).
     //
     // Eskiden burada dogrudan mission.start_or_resume() vardi ve run() de
@@ -137,6 +144,11 @@ void ModeAuto::run()
             sub.mission.start_or_resume();
             gorev_arm_bekliyor = false;
         }
+        // Guided overlay'i mission.update()'ten ONCE degerlendir: overlay
+        // verify_nav_wp'yi bloklar, dolayisiyla karar bu dongunun verify'inden once
+        // verilmis olmali.
+        guided_overlay_degerlendir();
+
         sub.mission.update();
     }
 
@@ -805,6 +817,67 @@ bool ModeAuto::auto_terrain_recover_start()
 // Attempt recovery from terrain failsafe
 // If recovery is successful resume mission
 // If recovery fails revert to failsafe action
+// AURA: guided overlay (MAV_CMD_AURA_GUIDED_SETUP) durum makinesi.
+//
+// ACIK iken ve CANLI bir guided setpoint varken, arac AUTO bacaginin yerine o
+// setpoint'e gider; veri susunca bacagina KALDIGI YERDEN devam eder.
+//
+// Yalniz NAV_WAYPOINT bacaklarinda gecerlidir. Demir, daire, satha cikis ve konum
+// sabitleme item'larinin her biri operatorun tam olarak istedigi bir seydir; bir
+// setpoint'in onlari ezmesi plani okunamaz hale getirirdi. Waypoint ise sadece
+// "su tarafa git" demek - yardimci bilgisayarin inceltmek isteyebilecegi sey tam
+// olarak budur.
+void ModeAuto::guided_overlay_degerlendir()
+{
+    const bool uygun = sub.guided_overlay_acik
+                       && sub.mission.get_current_nav_id() == MAV_CMD_NAV_WAYPOINT
+                       && sub.guided_verisi_taze(sub.guided_overlay_zaman_ms);
+
+    if (uygun && !sub.guided_overlay_etkin) {
+        // GIR: once bacagi sakla, sonra guided'a devret.
+        //
+        // Hedefi wp_nav'dan aliyoruz, gorev item'indan degil: do_nav_wp lat/lon==0
+        // olan bir item icin anlik konumu koyuyor, yani item'in kendisi her zaman
+        // uculuan noktayi vermiyor. wp_nav'daki cozulmus hedef dogru olan.
+        sub.guided_overlay_wp_neu_cm = sub.wp_nav.get_wp_destination_NEU_cm();
+        sub.guided_overlay_giris_ms = AP_HAL::millis();
+        sub.guided_overlay_etkin = true;
+        auto_nav_guided_start();
+        gcs().send_text(MAV_SEVERITY_INFO, "GuidedSetup: overlay engaged");
+        return;
+    }
+
+    if (!uygun && sub.guided_overlay_etkin) {
+        guided_overlay_birak();
+    }
+}
+
+// Overlay'den cikip kesilen NAV_WAYPOINT bacagini geri ver.
+void ModeAuto::guided_overlay_birak()
+{
+    if (!sub.guided_overlay_etkin) {
+        return;
+    }
+    sub.guided_overlay_etkin = false;
+
+    // Bacagi yeniden kur. auto_wp_start, wp_nav'i aracin BULUNDUGU yerden ayni
+    // hedefe dogru yeniden baslatir - guided nereye goturmus olursa olsun.
+    // AP_Mission durumuna DOKUNMUYORUZ: set_current_cmd(ayni index) o bacakla
+    // paralel kosan do-komut kuyrugunu dusururdu.
+    auto_wp_start(sub.guided_overlay_wp_neu_cm);
+
+    // Guard saatini overlay suresi kadar ILERI KAYDIR. Saat overlay boyunca
+    // isliyordu; kaydirmazsak uzun bir overlay, geri donuste bacagi hemen
+    // "guard time expired" ile atlatirdi.
+    const uint32_t gecen = AP_HAL::millis() - sub.guided_overlay_giris_ms;
+    sub.nav_wp_start_ms += gecen;
+
+    // Bekleme sayaci da overlay boyunca isliyordu; bacak yeniden basliyor.
+    sub.loiter_time = 0;
+
+    gcs().send_text(MAV_SEVERITY_INFO, "GuidedSetup: leg resumed");
+}
+
 // NAV_ATTITUDE_TIME (42703): verilen tutumu N saniye koru.
 //
 // AUV'de bunun karsiligi "kamerayi su yone doğrult ve orada bekle": bir duvara,

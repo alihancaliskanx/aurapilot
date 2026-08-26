@@ -449,6 +449,8 @@ public:
     float aura_daire_dikey_hiz_ms() const;
     float aura_daire_yaw_cd();
     void auto_nav_attitude_time_start(const AP_Mission::Mission_Command& cmd);
+    void guided_overlay_degerlendir();
+    void guided_overlay_birak();
     uint32_t nav_attitude_time_start_ms() const { return nav_attitude_time.start_ms; }
     void auto_nav_guided_start();
     void set_auto_yaw_roi(const Location &roi_location);

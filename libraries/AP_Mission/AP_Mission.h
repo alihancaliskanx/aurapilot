@@ -301,6 +301,49 @@ public:
     static_assert(sizeof(Aura_Circle_Command) == 10,
                   "Aura_Circle_Command must fit the 10-byte content block of a 16-bit-id command");
 
+    // AURA: "guided mission" - hand the leg to the companion computer, take it back
+    // when the companion stops talking.
+    //
+    // NAV_GUIDED_ENABLE (92) already hands control over, but its only exit is a
+    // DO_GUIDED_LIMITS breach: with no limits in front of it the mission parks on
+    // that item FOR EVER, and there is no data-loss exit at all. For a vehicle whose
+    // companion may reboot mid-dive that is the wrong failure mode. This command
+    // exits on silence: no setpoint for timeout_s and the mission simply carries on.
+    //
+    // Declared as 31025 on the wire; hasLocation=false, so the content union is free.
+    static constexpr uint16_t MAV_CMD_AURA_GUIDED_MISSION = 31025;
+
+    struct PACKED Aura_Guided_Mission_Command {
+        uint16_t timeout_ms;     // silence before the leg is abandoned (ms), 0 = 3000
+        uint16_t max_time_s;     // hard ceiling on the whole leg (s), 0 = no ceiling
+    };
+    static_assert(sizeof(Aura_Guided_Mission_Command) == 4,
+                  "Aura_Guided_Mission_Command must fit the 10-byte content block of a 16-bit-id command");
+
+    // AURA: "guided setup" - arm or disarm the guided OVERLAY. A do-command, so it
+    // never blocks the mission.
+    //
+    // While the overlay is armed, a live guided setpoint takes precedence over the
+    // AUTO leg the vehicle is flying: the vehicle goes where the companion says, and
+    // when the companion stops talking it resumes the very leg it was on. Unlike
+    // MAV_CMD_AURA_GUIDED_MISSION this is not a leg of its own - it is a property of
+    // the legs that follow it.
+    //
+    // Deliberately restricted to NAV_WAYPOINT legs: an anchor, a circle, a surface or
+    // a position fix each mean something the operator asked for precisely, and letting
+    // a stray setpoint override those would make the plan unreadable. A waypoint is
+    // just "be over there", which is exactly the thing a companion may want to refine.
+    //
+    // Declared as 31030 on the wire; hasLocation=false.
+    static constexpr uint16_t MAV_CMD_AURA_GUIDED_SETUP = 31030;
+
+    struct PACKED Aura_Guided_Setup_Command {
+        uint8_t  enable;         // 0 = overlay off, 1 = overlay on
+        uint16_t timeout_ms;     // silence before the overlay lets go (ms), 0 = 3000
+    };
+    static_assert(sizeof(Aura_Guided_Setup_Command) == 3,
+                  "Aura_Guided_Setup_Command must fit the 10-byte content block of a 16-bit-id command");
+
     // winch command structure
     struct PACKED Winch_Command {
         uint8_t num;            // winch number
@@ -463,6 +506,8 @@ public:
         // AURA position fix
         Aura_Position_Fix_Command aura_position_fix;
         Aura_Circle_Command aura_circle;
+        Aura_Guided_Mission_Command aura_guided_mission;
+        Aura_Guided_Setup_Command aura_guided_setup;
 
         // do-winch
         Winch_Command winch;

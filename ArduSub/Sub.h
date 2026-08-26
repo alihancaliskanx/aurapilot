@@ -312,6 +312,22 @@ private:
     float    daire_yaw_cd = 0.0f;      // heading used by yaw modes 1 and 2 (centi-degrees)
     uint8_t  daire_yaw_kip = 0;        // 0 = face centre, 1 = hold heading, 2 = fixed, 3 = tangent
 
+    // AURA: disaridan gelen guided setpoint'inin zaman damgasi.
+    //
+    // ModeGuided'in kendi update_time_ms'i BU IS ICIN KULLANILAMAZ: dosya-statik
+    // (disaridan okunamaz) ve daha kotusu, msg 86'nin KONUM yolunu besleyen
+    // guided_set_destination(Vector3f) onu HIC guncellemiyor. Yani "veri geliyor mu"
+    // sorusuna oradan dogru cevap alinamaz. Damga isleyicide, setpoint kabul edildigi
+    // anda basilir.
+    uint32_t guided_veri_ms = 0;
+
+    // AURA: guided overlay (MAV_CMD_AURA_GUIDED_SETUP) durumu
+    bool     guided_overlay_acik = false;      // item ile kuruldu mu
+    uint32_t guided_overlay_zaman_ms = 0;      // veri sessizlik esigi
+    bool     guided_overlay_etkin = false;     // su an AUTO bacaginin ustune yaziyor mu
+    Vector3f guided_overlay_wp_neu_cm;         // overlay'e girerken saklanan WP hedefi
+    uint32_t guided_overlay_giris_ms = 0;      // overlay'e girildigi an (guard saatini kaydirmak icin)
+
     // Battery Sensors
     AP_BattMonitor battery{MASK_LOG_CURRENT,
                            FUNCTOR_BIND_MEMBER(&Sub::handle_battery_failsafe, void, const char*, const int8_t),
@@ -589,6 +605,10 @@ private:
     bool verify_circle(const AP_Mission::Mission_Command& cmd);
     bool verify_aura_circle(const AP_Mission::Mission_Command& cmd);
     bool verify_nav_attitude_time(const AP_Mission::Mission_Command& cmd);
+    void do_aura_guided_mission(const AP_Mission::Mission_Command& cmd);
+    bool verify_aura_guided_mission(const AP_Mission::Mission_Command& cmd);
+    void do_aura_guided_setup(const AP_Mission::Mission_Command& cmd);
+    bool guided_verisi_taze(uint32_t esik_ms) const;
     bool aura_sonraki_konumlu_wp(uint16_t index, Location &konum);
 #if NAV_GUIDED
     bool verify_nav_guided_enable(const AP_Mission::Mission_Command& cmd);
