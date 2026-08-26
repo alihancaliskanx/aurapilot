@@ -60,10 +60,10 @@ void AP_VisualOdom_Backend::handle_vision_position_delta_msg(const mavlink_messa
 #if AP_AHRS_ENABLED || HAL_LOGGING_ENABLED
     const float time_delta_sec = packet.time_delta_usec * 1.0E-6;
 
-    // AURA: dip kilidi olmayan DVL confidence=0 ve delta=(0,0,0) yollar; bunlar
-    // EKF'e girerse arac "duruyor" diye fuze edilir ve konum donar.  QUAL_MIN
-    // kapisi upstream'de yalniz pozisyon/hiz mesajlarinda vardi, delta yolunda yoktu.
-    // VISO_QUAL_MIN = -1 ise kullanici bilerek kotu veriyi de istiyor demektir.
+    // AURA: a DVL without bottom lock sends confidence=0 and delta=(0,0,0); if those
+    // reach the EKF the vehicle is fused as "stationary" and the position freezes. The
+    // QUAL_MIN gate existed upstream only on the position/velocity messages, not on the
+    // delta path. VISO_QUAL_MIN = -1 means the user deliberately wants the bad data too.
     const int8_t quality_min = _frontend.get_quality_min();
     const bool ignored = (quality_min >= 0) &&
                          (!is_positive(packet.confidence) || _quality < quality_min);

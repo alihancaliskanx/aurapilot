@@ -678,11 +678,11 @@ void GCS_MAVLINK_Sub::handle_message(const mavlink_message_t &msg)
         mavlink_set_position_target_global_int_t packet;
         mavlink_msg_set_position_target_global_int_decode(&msg, &packet);
 
-        // AURA: guided overlay silahliysa AUTO'nun HERHANGI bir alt-modunda da
-        // dinleriz. Yoksa tavuk-yumurta olurdu: overlay ancak veri TAZE iken
-        // devreye giriyor, veri damgasi ise yalniz kabul edilen mesajlarda basiliyor;
-        // kapi AUTO+Auto_WP'yi reddettigi surece damga hic basilmaz ve overlay hic
-        // devreye giremezdi.
+        // AURA: if the guided overlay is armed we listen in ANY sub-mode of AUTO as well.
+        // Otherwise it would be chicken-and-egg: the overlay only engages while the data
+        // is FRESH, and the data stamp is only taken on accepted messages; as long as the
+        // gate rejected AUTO+Auto_WP the stamp would never be taken and the overlay could
+        // never engage at all.
         const bool aura_overlay_bekliyor = (sub.control_mode == Mode::Number::AUTO)
                                            && sub.guided_overlay_acik
                                            && (sub.auto_mode != Auto_NavGuided);
@@ -736,36 +736,36 @@ void GCS_MAVLINK_Sub::handle_message(const mavlink_message_t &msg)
             }
         }
 
-        // AURA: disaridan bir setpoint kabul edildi - damgayi bas.
+        // AURA: a setpoint from outside has been accepted - take the stamp.
         //
-        // Bu damga "guided verisi akiyor mu" sorusunun TEK guvenilir kaynagi:
-        // ModeGuided'in update_time_ms'i konum yolunda hic guncellenmiyor
-        // (guided_set_destination(Vector3f) ona dokunmuyor). AURA_GUIDED_MISSION ve
-        // AURA_GUIDED_SETUP kararlarini buna dayandiriyor.
+        // This stamp is the ONLY reliable source for the question "is guided data
+        // flowing": ModeGuided's update_time_ms is never updated on the position path
+        // (guided_set_destination(Vector3f) does not touch it). AURA_GUIDED_MISSION and
+        // AURA_GUIDED_SETUP base their decisions on this.
         sub.guided_veri_ms = AP_HAL::millis();
 
-        // Overlay henuz DEVREDE DEGILKEN setpoint UYGULANMAZ, yalnizca damgalanir.
+        // While the overlay is NOT ENGAGED yet the setpoint is NOT APPLIED, only stamped.
         //
-        // Uygulasaydik guided_set_destination Guided_WP alt-modunu baslatir ve
-        // wp_nav'in gorev hedefini overlay daha onu SAKLAYAMADAN ezerdi; bacak geri
-        // verilemez hale gelirdi. Bir sonraki dongude guided_overlay_degerlendir()
-        // bacagi saklayip Auto_NavGuided'a gecirir ve bundan sonraki setpoint'ler
-        // normal yoldan uygulanir. Maliyeti tek mesajlik gecikme.
+        // Had we applied it, guided_set_destination would start the Guided_WP sub-mode and
+        // overwrite wp_nav's mission target BEFORE the overlay could SAVE it; the leg would
+        // become impossible to hand back. On the next loop guided_overlay_degerlendir()
+        // saves the leg and switches to Auto_NavGuided, and the setpoints after that are
+        // applied through the normal path. The cost is a delay of one message.
         if (aura_overlay_bekliyor) {
             break;
         }
 
-        // AURA: ANCHOR modunun "demir verisi". Bu mod bir hiz/ivme hedefi kabul
-        // etmez - tutulacak NOKTA ve (istege bagli) BAS ACISI ister. Bu yuzden
-        // asagidaki GUIDED dallanmasindan once, ayri ele alinir.
+        // AURA: the "anchor data" of ANCHOR mode. This mode does not accept a velocity or
+        // acceleration target - it wants the POINT to hold and (optionally) a HEADING. That
+        // is why it is handled separately, before the GUIDED branch below.
         //
-        // yaw: msg 86 alanini radyan tasiyor. Bu isleyici onu eskiden TAMAMEN
-        // yok sayiyordu ("for future use"); ArduCopter'in ayni mesajdaki deseni
-        // ornek alindi. Goreli yaw KASITLI OLARAK YOK: kuresel bir cercevede
-        // "govdeye gore yaw" tanimsizdir (Copter da global mesajda kullanmaz).
+        // yaw: the msg 86 field carries radians. This handler used to ignore it COMPLETELY
+        // ("for future use"); ArduCopter's pattern for the same message was taken as the
+        // model. Relative yaw is DELIBERATELY ABSENT: in a global frame "yaw relative to
+        // the body" is undefined (Copter does not use it in the global message either).
         if (sub.control_mode == Mode::Number::ANCHOR) {
             if (pos_ignore) {
-                // Nokta yoksa tutulacak bir demir de yok.
+                // With no point there is no anchor to hold either.
                 break;
             }
             sub.mode_anchor.demir_verisi_al(pos_neu_cm, !yaw_ignore,

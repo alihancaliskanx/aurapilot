@@ -8,39 +8,39 @@
  *  Code in this file implements the navigation commands
  */
 
-// AURA sig-su satih tavani (GOREV_ALGORITMASI.md §7): SEYIRDE dikey hedef
-// satihtan en az 0.3 m derinlikte tutulur — arac su altinda ilerlerken
-// istemeden satha cikmasin. Sig suda terrain hedefi ("tabandan +1 m") su
-// seviyesinin USTUNE dusebilir -> arac satihta durmadan yukari iterdi.
+// AURA shallow-water surface ceiling (GOREV_ALGORITMASI.md §7): WHILE TRANSITING the vertical
+// target is held at least 0.3 m below the surface, so the vehicle does not surface
+// unintentionally while moving underwater. In shallow water the terrain target ("+1 m off the
+// bottom") can fall ABOVE water level -> the vehicle would push up at the surface forever.
 //
-// ISTISNA: gorevin ACIKCA komutladigi satih waypoint'i (ornegin alt = -0.1 m)
-// tavandan sig ise ona izin verilir; tavan yalnizca ISTEMEDEN satha cikmayi
-// engeller, satha cikma emrini bogmaz. (Satih WP'si -0.1 m'dir: govde ~35 cm,
-// derinlik sensoru dikey ortada -> sensor 10 cm su altinda kalirken kamera
-// suyun disinda olur.) Istisna yalnizca terrain-frame OLMAYAN bacaklar icin:
-// terrain bacaginda hedef z tabandan olcudur, satih tavaniyla kiyaslanamaz.
+// EXCEPTION: a surface waypoint the mission COMMANDS EXPLICITLY (for example alt = -0.1 m) is
+// allowed if it is shallower than the ceiling; the ceiling only prevents UNINTENTIONAL
+// surfacing, it does not choke an order to surface. (The surface WP is -0.1 m: hull ~35 cm and
+// the depth sensor is vertically centred -> the sensor stays 10 cm underwater while the camera
+// is out of the water.) The exception is only for legs that are NOT terrain-frame: on a terrain
+// leg the target z is measured from the bottom and cannot be compared with the surface ceiling.
 //
-// 4.5'teki get/set_pos_target_z_cm ikilisi 4.7'de yok: nihai hedef yalniz
-// D_update_controller() icinde kuruluyor (AC_PosControl.cpp:1094,
-// _pos_target = desired + offset + terrain) ve disariya sadece desired yazilabilir.
-// DIKKAT: bu fonksiyon update_wpnav() ile D_update_controller() ARASINDA calisir,
-// yani get_pos_target_NED_m() bir dongu BAYAT deger dondurur. Bayat hedeften
-// "fark" cikarmak periyot-2 salinim uretir (tavan bir dongu tutar, bir dongu
-// kacar; sig suda ortalama hedef satihin ustunde kalir ve tavan tamamen bosa
-// duser). Bu yuzden bu dongunun hedefi yerel hesaplanir ve desired MUTLAK
-// yazilir -> islem idempotent, her dongude yeniden degerlendirilir
-// (rangefinder/terrain degisimini izler). Birimler metre, U = yukari pozitif.
+// The get/set_pos_target_z_cm pair of 4.5 does not exist in 4.7: the final target is built
+// only inside D_update_controller() (AC_PosControl.cpp:1094,
+// _pos_target = desired + offset + terrain) and only desired can be written from outside.
+// CAUTION: this function runs BETWEEN update_wpnav() and D_update_controller(), so
+// get_pos_target_NED_m() returns a value one loop STALE. Subtracting a "difference" from a
+// stale target produces a period-2 oscillation (the ceiling holds for one loop and misses the
+// next; in shallow water the average target stays above the surface and the ceiling is
+// completely wasted). That is why this loop's target is computed locally and desired is written
+// ABSOLUTELY -> idempotent, re-evaluated every loop (it follows rangefinder/terrain changes).
+// Units are metres, U = up positive.
 //
-// Cekirdek, komut edilen hedefi disaridan alir: wp_nav'in hedefi yalniz seyir
-// bacaklarinda anlamli, daire bacaginda wp_nav bayat/alakasiz bir hedef tutuyor.
-// Daire de ayni tavana tabi olmali (bkz. aura_daire_satih_tavani_uygula).
+// The core takes the commanded target from outside: wp_nav's target is meaningful only on
+// transit legs, on a circle leg wp_nav holds a stale/irrelevant target. The circle must be
+// subject to the same ceiling too (see aura_daire_satih_tavani_uygula).
 void aura_satih_tavani_cekirdek(AC_PosControl *position_control,
                                 float komut_u_m, bool terrain_mi)
 {
-    constexpr float SATIH_TAVANI_U_M = -0.30f;   // U (yukari, m; 0 = satih)
+    constexpr float SATIH_TAVANI_U_M = -0.30f;   // U (up, m; 0 = surface)
     float tavan_u_m = SATIH_TAVANI_U_M;
     if (!terrain_mi) {
-        // komut edilen hedef daha sigsa (satha cikis WP'si) tavani ona ac
+        // if the commanded target is shallower (a surfacing WP) open the ceiling up to it
         tavan_u_m = MAX(tavan_u_m, komut_u_m);
     }
     // hedef_u = desired_u + ofset_u ; ofset_u = -(pos_offset_D + pos_terrain_D)
@@ -50,13 +50,13 @@ void aura_satih_tavani_cekirdek(AC_PosControl *position_control,
     if (hedef_u_m > tavan_u_m) {
         position_control->set_pos_desired_U_m(tavan_u_m - ofset_u_m);
 
-        // Konum hedefini kirpmak TEK BASINA yetmiyordu: AC_WPNav yorungeyi konum,
-        // HIZ ve IVME olarak birlikte yaziyor (set_pos_vel_accel_NED_m) ve
-        // D_update_controller ikisini de hedefe EKLIYOR. Tavan devredeyken P terimi
-        // hedefi -0.30 m'de tutarken ileri-besleme hala YUKARI komut ediyor, arac da
-        // konum hatasi ileri-beslemeyi yenene kadar tavanin USTUNE tasiyordu.
-        // Kirpilmis yorungenin yukari bileseni artik gecerli degil, sifirlanir.
-        // (Asagi yonlu ileri-beslemeye dokunulmaz: o zaten tavandan uzaklastiriyor.)
+        // Clamping the position target ALONE was not enough: AC_WPNav writes the trajectory
+        // as position, VELOCITY and ACCELERATION together (set_pos_vel_accel_NED_m) and
+        // D_update_controller ADDS both of them to the target. With the ceiling active the P
+        // term held the target at -0.30 m while the feed-forward still commanded UP, so the
+        // vehicle overshot ABOVE the ceiling until position error beat the feed-forward.
+        // The up component of the clamped trajectory is no longer valid and is zeroed.
+        // (Downward feed-forward is not touched: it already moves away from the ceiling.)
         if (is_negative(position_control->get_vel_desired_NED_ms().z)) {
             position_control->set_vel_desired_D_ms(0.0f);
         }
@@ -66,7 +66,7 @@ void aura_satih_tavani_cekirdek(AC_PosControl *position_control,
     }
 }
 
-// Seyir bacaklari: komut edilen hedef wp_nav'dan gelir.
+// Transit legs: the commanded target comes from wp_nav.
 static void aura_satih_tavani_uygula(AC_PosControl *position_control, const AC_WPNav &wp_nav)
 {
     aura_satih_tavani_cekirdek(position_control,
@@ -74,7 +74,7 @@ static void aura_satih_tavani_uygula(AC_PosControl *position_control, const AC_W
                                wp_nav.origin_and_destination_are_terrain_alt());
 }
 
-// Daire bacagi: komut edilen hedef dairenin merkez irtifasidir.
+// Circle leg: the commanded target is the circle's centre altitude.
 static void aura_daire_satih_tavani_uygula(AC_PosControl *position_control, const AC_Circle &circle_nav)
 {
     aura_satih_tavani_cekirdek(position_control,
@@ -100,26 +100,26 @@ bool ModeAuto::init(bool ignore_checks) {
     // clear guided limits
     guided_limit_clear();
 
-    // Guided overlay'i AUTO'ya her girişte KAPAT. Gerekcesi guided_limit_clear ile
-    // ayni: kontrol otoritesini devreden bir ayar, operatorun yaptigi bir mod
-    // degisikliginden sagligiyla cikmamali. Plan overlay'i istiyorsa
-    // MAV_CMD_AURA_GUIDED_SETUP item'i onu yeniden acar.
+    // TURN OFF the guided overlay on every entry into AUTO. The rationale is the same as
+    // guided_limit_clear: a setting that hands over control authority must not survive a
+    // mode change made by the operator. If the plan wants the overlay, the
+    // MAV_CMD_AURA_GUIDED_SETUP item turns it back on.
     sub.guided_overlay_acik = false;
     sub.guided_overlay_etkin = false;
 
-    // Gorev BURADA baslatilmaz - arac arm olana kadar beklenir (run() icinde).
+    // The mission is NOT started HERE - we wait until the vehicle is armed (inside run()).
     //
-    // Eskiden burada dogrudan mission.start_or_resume() vardi ve run() de
-    // mission.update()'i arm durumundan bagimsiz cagiriyordu. Sonuc: AUTO'ya disarm
-    // halde girildigi anda gorev kosmaya basliyor, auto_wp_run'in disarm dali her
-    // dongude wp_and_spline_init_m() ile hedefi anlik konuma sifirladigi icin
-    // reached_wp_destination() derhal true donuyor ve TUM plan yerinde tukeniyordu.
-    // SITL'de olculdu: 5 waypoint'lik plan, arac hic kimildamadan 0.01 saniyede
-    // "gorev tamamlandi". Operator sonra arm ettiginde yapilacak is kalmiyor.
-    // Bu, aracin normal akisi (once AUTO, sonra ARM - gorev_yukle.py --auto --arm
-    // tam olarak bunu yapar) oldugu icin teorik degil.
+    // There used to be a direct mission.start_or_resume() here and run() called
+    // mission.update() regardless of arm state. The result: the mission started running
+    // the moment AUTO was entered while disarmed, and because auto_wp_run's disarm branch
+    // reset the target to the current position every loop with wp_and_spline_init_m(),
+    // reached_wp_destination() returned true immediately and the WHOLE plan was consumed
+    // on the spot. Measured in SITL: a 5 waypoint plan reported "mission complete" in 0.01
+    // seconds without the vehicle moving at all. When the operator then armed, there was
+    // no work left to do. This is not theoretical, because it is the vehicle's normal flow
+    // (AUTO first, then ARM - gorev_yukle.py --auto --arm does exactly this).
     //
-    // Copter ayni isi waiting_to_start bayragiyla yapiyor (ArduCopter/mode_auto.cpp).
+    // Copter does the same thing with its waiting_to_start flag (ArduCopter/mode_auto.cpp).
     gorev_arm_bekliyor = true;
     return true;
 }
@@ -128,25 +128,25 @@ bool ModeAuto::init(bool ignore_checks) {
 // according to the current auto_mode
 void ModeAuto::run()
 {
-    // Gorev yalnizca arac ARM iken ilerler.
+    // The mission only advances while the vehicle is ARMED.
     //
-    // Disarm halde mission.update() cagirmak iki ayri sekilde zarar veriyordu:
-    //   1) auto_wp_run'in disarm dali hedefi her dongude sifirladigi icin waypoint'ler
-    //      aninda "ulasildi" sayiliyor, plan yerinde tukeniyordu (bkz. init()).
-    //   2) AURA guard sayaclari (nav_wp_guard_ms, demir guard'i) arm durumuna
-    //      bakmadan isliyor, yani sureli item'lar da kendiliginden ilerliyordu.
-    // Demir deklansorunun arm kontrolu (commands_logic.cpp, "In AUTO the mission runs
-    // regardless of arm state") bu sorunun BELIRTISINE konmus bir yamaydi; sebep
-    // buydu ve artik burada kapatiliyor.
+    // Calling mission.update() while disarmed did damage in two separate ways:
+    //   1) because auto_wp_run's disarm branch reset the target every loop, waypoints
+    //      counted as "reached" instantly and the plan was consumed on the spot (see init()).
+    //   2) the AURA guard timers (nav_wp_guard_ms, the anchor guard) ran without looking
+    //      at arm state, so timed items advanced by themselves as well.
+    // The arm check on the anchor shutter (commands_logic.cpp, "In AUTO the mission runs
+    // regardless of arm state") was a patch applied to the SYMPTOM of this problem; this
+    // was the cause and it is now closed here.
     if (motors.armed()) {
         if (gorev_arm_bekliyor) {
             // start/resume the mission (based on MIS_RESTART parameter)
             sub.mission.start_or_resume();
             gorev_arm_bekliyor = false;
         }
-        // Guided overlay'i mission.update()'ten ONCE degerlendir: overlay
-        // verify_nav_wp'yi bloklar, dolayisiyla karar bu dongunun verify'inden once
-        // verilmis olmali.
+        // Evaluate the guided overlay BEFORE mission.update(): the overlay blocks
+        // verify_nav_wp, so the decision has to have been made before this loop's
+        // verify.
         guided_overlay_degerlendir();
 
         sub.mission.update();
@@ -186,10 +186,10 @@ void ModeAuto::run()
         auto_nav_attitude_time_run();
         break;
 
-    // BILEREK default: YOK. Tum AutoSubMode degerleri yukarida kapsanmis durumda;
-    // default: eklemek -Wswitch'i susturur ve ileride eklenecek bir alt-modun
-    // "hicbir cikis uretmeyen durum" olmasi DERLEME ZAMANINDA yakalanamaz hale gelir.
-    // Koruma, korumasi gereken seyi gizlemis olurdu.
+    // There is DELIBERATELY no default:. All AutoSubMode values are covered above;
+    // adding a default: would silence -Wswitch and make it impossible to catch AT
+    // COMPILE TIME that a sub-mode added later is a "state that produces no output".
+    // The guard would have hidden the very thing it is supposed to guard.
     }
 }
 
@@ -262,7 +262,7 @@ void ModeAuto::auto_wp_run()
     // TODO implement waypoint radius individually for each waypoint based on cmd.p2
     // TODO fix auto yaw heading to switch to something appropriate when mission complete and switches to loiter
     sub.failsafe_terrain_set_status(sub.wp_nav.update_wpnav());
-    aura_satih_tavani_uygula(position_control, sub.wp_nav);   // seyirde hedef satihtan >= 0.3 m derinde (satih WP haric)
+    aura_satih_tavani_uygula(position_control, sub.wp_nav);   // in transit the target is >= 0.3 m below the surface (except a surface WP)
 
     ///////////////////////
     // update xy outputs //
@@ -298,28 +298,28 @@ void ModeAuto::auto_wp_run()
 // auto_circle_movetoedge_start - initialise waypoint controller to move to edge of a circle with it's center at the specified location
 //  we assume the caller has set the circle's circle with sub.circle_nav.set_center()
 //  we assume the caller has performed all required GPS_ok checks
-// radius_m : 0 = CIRCLE_RADIUS_M parametresini kullan
-// rate_degs: ISARETLI acisal hiz (+ saat yonu, - ters); 0 = CIRCLE_RATE parametresini
-//            isaretiyle birlikte kullan
+// radius_m : 0 = use the CIRCLE_RADIUS_M parameter
+// rate_degs: SIGNED angular rate (+ clockwise, - counter-clockwise); 0 = use the
+//            CIRCLE_RATE parameter together with its sign
 void ModeAuto::auto_circle_movetoedge_start(const Location &circle_center, float radius_m, float rate_degs)
 {
     // set circle center
     sub.circle_nav.set_center(circle_center);
 
-    // Yaricap HER ZAMAN yazilir. Eskiden sifir yaricap "dokunma" demekti ve
-    // AC_Circle::update_ms ham _radius_m'i kullandigi icin (get_radius_m()'in
-    // parametre geri dusumu ORADA calismaz) geride kalan deger neyse o cizilirdi:
-    // ilk acilista 0 -> yerinde donme, bir onceki daireden sonra 0 -> o dairenin
-    // yaricapi. Ikisi de gorev item'inin soyledigi sey degil. AURA'da 0 = "CIRCLE_RADIUS_M
-    // parametresini kullan". get_radius_m() BU IS ICIN YANLIS: geri dusumu yalniz hic
-    // calisma-ani yaricap yazilmamisken yapar, yazilmissa o bayat degeri dondurur -
-    // yani duzeltmek istedigimiz hatanin ta kendisi. Parametre dogrudan okunur.
+    // The radius is ALWAYS written. A zero radius used to mean "do not touch", and because
+    // AC_Circle::update_ms uses the raw _radius_m (get_radius_m()'s fallback to the
+    // parameter does NOT apply THERE) whatever value was left behind got flown: 0 on the
+    // first boot -> spinning in place, 0 after a previous circle -> that circle's radius.
+    // Neither is what the mission item said. In AURA 0 = "use the CIRCLE_RADIUS_M
+    // parameter". get_radius_m() IS WRONG FOR THIS JOB: it only falls back while no
+    // run-time radius has ever been written, and once one has it returns that stale value
+    // - i.e. exactly the bug we are trying to fix. The parameter is read directly.
     sub.circle_nav.set_radius_m(is_zero(radius_m) ? sub.circle_nav.get_radius_parm_m() : radius_m);
 
-    // Acisal hiz da item basina verilebilir. Eskiden buraya yalnizca bir "ccw" bayragi
-    // geliyor, buyukluk her zaman CIRCLE_RATE'ten okunuyordu; yani gorevdeki her daire
-    // ayni hizda donmek zorundaydi. Simdi isaretli hiz dogrudan geliyor, 0 ise
-    // parametreye (isareti dahil) dusuluyor.
+    // The angular rate can be given per item as well. Previously only a "ccw" flag arrived
+    // here and the magnitude was always read from CIRCLE_RATE; that is, every circle in the
+    // mission had to turn at the same rate. Now the signed rate arrives directly, and if it
+    // is 0 we fall back to the parameter (including its sign).
     sub.circle_nav.set_rate_degs(is_zero(rate_degs) ? sub.circle_nav.get_rate_degs() : rate_degs);
 
     // check our distance from edge of circle
@@ -329,15 +329,15 @@ void ModeAuto::auto_circle_movetoedge_start(const Location &circle_center, float
 
     // if more than 3m then fly to edge
     if (dist_to_edge > 300.0f) {
-        // Durum, set_wp_destination_loc'tan ONCE yazilir ve boyle kalmali.
+        // The state is written BEFORE set_wp_destination_loc and it must stay that way.
         //
-        // Bir ara sona tasinmisti ("araya giren bir run() bir onceki hedefe surer"
-        // gerekcesiyle) ama o gerekce YANLISTI: mission.update() zaten ModeAuto::run()
-        // icinden, kontrolcu switch'inden ONCE cagriliyor, yani do_* ile run() araya
-        // giremez. Dahasi tasima gercek bir hata uretiyordu: asagidaki
-        // set_wp_destination_loc basarisiz olursa failsafe_terrain_on_event() calisir,
-        // o da auto_mode'u Auto_TerrainRecover yapip gorevi durdurur - sondaki atama
-        // bunu EZIP terrain failsafe'ini sessizce iptal ederdi.
+        // At one point it was moved to the end (on the grounds that "an intervening run()
+        // would fly to the previous target") but that reasoning was WRONG: mission.update()
+        // is already called from inside ModeAuto::run(), BEFORE the controller switch, so
+        // run() cannot come between do_* and this. Worse, the move produced a real bug: if
+        // the set_wp_destination_loc below fails, failsafe_terrain_on_event() runs, which
+        // sets auto_mode to Auto_TerrainRecover and stops the mission - and the assignment
+        // at the end would OVERWRITE that, silently cancelling the terrain failsafe.
         sub.auto_mode = Auto_CircleMoveToEdge;
 
         // convert circle_edge_neu_cm to Location
@@ -353,9 +353,9 @@ void ModeAuto::auto_circle_movetoedge_start(const Location &circle_center, float
         }
 
         // if we are outside the circle, point at the edge, otherwise hold yaw
-        // Aktif bir ROI varsa ona dokunma: DO_SET_ROI kamerayi bir noktaya kilitler ve
-        // daireye giden bacak onu sessizce eziyordu. auto_wp_start ayni korumayi zaten
-        // yapiyor, Copter da (mode_auto.cpp circle_movetoedge_start) yapiyor.
+        // If a ROI is active do not touch it: DO_SET_ROI locks the camera onto a point and
+        // the leg going to the circle used to overwrite it silently. auto_wp_start already
+        // has the same guard, and so does Copter (mode_auto.cpp circle_movetoedge_start).
         if (sub.auto_yaw_mode != AUTO_YAW_ROI) {
             float dist_to_center = get_horizontal_distance(inertial_nav.get_position_xy_cm().topostype(), sub.circle_nav.get_center_NEU_cm().xy());
             if (dist_to_center > sub.circle_nav.get_radius_cm() && dist_to_center > 500) {
@@ -375,44 +375,44 @@ void ModeAuto::auto_circle_movetoedge_start(const Location &circle_center, float
 //   assumes that circle_nav object has already been initialised with circle center and radius
 void ModeAuto::auto_circle_start()
 {
-    // Yaw kipi 1 = "daireye GIRERKEN bakilan yonu koru". Bu, item'in basladigi an
-    // degil, dairenin basladigi andir: arada kenara gitme bacagi varsa arac orada
-    // LOOK_AT_NEXT_WP ile doner, o yuzden aci burada yakalanir.
+    // Yaw mode 1 = "keep the heading you had when ENTERING the circle". That is the moment
+    // the circle starts, not the moment the item starts: if there is a move-to-edge leg in
+    // between, the vehicle turns there with LOOK_AT_NEXT_WP, so the angle is captured here.
     if (sub.daire_yaw_kip == 1) {
         sub.daire_yaw_cd = sub.ahrs.yaw_sensor;
     }
 
-    // init_NEU_cm'e get_rate_degs() vermek DONUS YONUNU CÖPE ATIYORDU.
-    // get_rate_degs() CIRCLE_RATE PARAMETRESINI okur; auto_circle_movetoedge_start'in
-    // set_rate_degs() ile yazdigi isareti degil (AC_Circle.h: ikisi ayri uyeler,
-    // _rate_parm_degs vs _rotation_rate_max_rads). Sonuc: gorevdeki param3<0 (CCW)
-    // istegi her seferinde sessizce dusuyor, arac CIRCLE_RATE'in isaretine gore
-    // (varsayilan +2 deg/s -> saat yonunde) donuyordu. get_rate_max_degs() az once
-    // yazilan isaretli degeri geri verir.
-    // NOT: Copter'da da ayni hata var (ArduCopter/mode_auto.cpp circle_start).
+    // Passing get_rate_degs() to init_NEU_cm THREW THE TURN DIRECTION AWAY.
+    // get_rate_degs() reads the CIRCLE_RATE PARAMETER, not the sign that
+    // auto_circle_movetoedge_start wrote with set_rate_degs() (AC_Circle.h: those are two
+    // separate members, _rate_parm_degs vs _rotation_rate_max_rads). The result: the
+    // mission's param3<0 (CCW) request was silently dropped every time and the vehicle
+    // turned according to the sign of CIRCLE_RATE (default +2 deg/s -> clockwise).
+    // get_rate_max_degs() gives back the signed value that was just written.
+    // NOTE: Copter has the same bug (ArduCopter/mode_auto.cpp circle_start).
     sub.circle_nav.init_NEU_cm(sub.circle_nav.get_center_NEU_cm(),
                                sub.circle_nav.center_is_terrain_alt(),
                                sub.circle_nav.get_rate_max_degs());
 
-    // Durum en sona: init_NEU_cm pozisyon kontrolcusunu sifirliyor.
+    // The state goes last: init_NEU_cm resets the position controller.
     sub.auto_mode = Auto_Circle;
 }
 
 // auto_circle_run - circle in AUTO flight mode
 //      called by auto_run at 100hz or more
-// Dairenin dikey ekseni: merkez irtifasina dogru sekillendirilmis tirmanma hizi (m/s, U).
+// The circle's vertical axis: a shaped climb rate towards the centre altitude (m/s, U).
 //
-// AC_Circle::update_ms terrain OLMAYAN dalda dikey hedefi kendisi kurmaz - hedefi
-// "-get_pos_desired_U_m()", yani mevcut hedefin kendisi yapar (AC_Circle.cpp:241) ve
-// dikey ekseni yalniz verilen climb_rate ile surer. Climb rate verilmezse (eski hal)
-// bu "bulundugun derinligi koru" demektir ve gorev item'inin irtifasi HIC uygulanmaz.
-// Bu, arac daire kenarina 3 m'den yakin basladiginda goze batar: kenara gitme bacagi
-// atlanir (o bacak derinligi copy_alt_from ile tasiyordu), daire de derinligi hic
-// komut etmez - item -12 m dese bile arac bulundugu derinlikte doner.
+// On the NON-terrain branch AC_Circle::update_ms does not build the vertical target itself -
+// it makes the target "-get_pos_desired_U_m()", the current target itself (AC_Circle.cpp:241),
+// and drives the vertical axis only with the given climb_rate. With no climb rate (the old
+// state) that means "hold the depth you are at" and the mission item's altitude is NEVER
+// applied. This is glaring when the vehicle starts closer than 3 m to the circle edge: the
+// move-to-edge leg is skipped (that leg carried the depth via copy_alt_from) and the circle
+// never commands a depth either - even if the item says -12 m it turns at its current depth.
 float ModeAuto::aura_daire_dikey_hiz_ms() const
 {
     if (sub.circle_nav.center_is_terrain_alt()) {
-        // terrain dalinda kutuphane hedefi zaten input_pos_vel_accel_D_m ile suruyor
+        // on the terrain branch the library already drives the target with input_pos_vel_accel_D_m
         return 0.0f;
     }
     const float hedef_u_m = (float)sub.circle_nav.get_center_NEU_cm().z * 0.01f;
@@ -428,13 +428,13 @@ float ModeAuto::aura_daire_dikey_hiz_ms() const
 
 void ModeAuto::auto_circle_run()
 {
-    // Arac disarm ise: eskiden bu fonksiyonun arm korumasi HIC yoktu; motor cikislari
-    // ve dikey kontrolcu disarm halde de suruluyordu. auto_wp_run'daki koruma ornek
-    // alindi - AMA oradaki gibi hedefi SIFIRLAMIYORUZ. auto_wp_run disarm dalinda
-    // wp_and_spline_init_m() cagirir, bu da hedefi anlik konuma tasir ve
-    // reached_wp_destination() aninda true olur; AUTO'ya disarm halde girilirse gorev
-    // bu yuzden yerinde kosarak tukeniyor. Daire icin ayni tuzaga dusmemek adina
-    // circle_nav durumuna dokunulmaz: acilar birikmez, verify_circle tamamlanmaz.
+    // If the vehicle is disarmed: this function used to have NO arm guard at all; the motor
+    // outputs and the vertical controller were driven while disarmed too. The guard in
+    // auto_wp_run was taken as the model - BUT we do NOT RESET the target the way it does.
+    // auto_wp_run's disarm branch calls wp_and_spline_init_m(), which moves the target to the
+    // current position so reached_wp_destination() becomes true instantly; that is why AUTO
+    // entered while disarmed consumes the mission on the spot. To avoid that trap for the
+    // circle, circle_nav state is untouched: angles do not accumulate, verify_circle does not complete.
     if (!motors.armed()) {
         motors.set_desired_spool_state(AP_Motors::DesiredSpoolState::GROUND_IDLE);
         // Sub vehicles do not stabilize roll/pitch/yaw when disarmed
@@ -443,26 +443,26 @@ void ModeAuto::auto_circle_run()
         return;
     }
 
-    // DIKKAT: burada check_param_change() CAGRILMAZ.
+    // CAUTION: check_param_change() is NOT CALLED here.
     //
-    // ModeCircle onu cagirir ve orada dogrudur - o modda yaricap zaten parametrenin
-    // kendisidir. AUTO'da ise yaricabi GOREV ITEM'I belirler ve check_param_change()
-    // onu eziyor: _last_radius_param_m yalnizca AC_Circle::init() icinde kuruluyor,
-    // AUTO ise init_NEU_cm() yolunu kullandigi icin o alan 0'da kaliyor. Sonucta ilk
-    // cagri her zaman "parametre degismis" sanip _radius_m'e CIRCLE_RADIUS_M'i
-    // yaziyordu. SITL'de olculdu: item 2.50 m isterken arac 10.00 m (parametre
-    // degeri) yaricapinda dondu. Item'i parametre ezmemeli.
-    // Motorlari tam aralia al. Bu satir yoktu: daire gorevin ILK nav komutuysa
-    // (kenara gitme bacagi da atlanmissa) spool durumu hicbir zaman
-    // THROTTLE_UNLIMITED'a cekilmiyor, arac GROUND_IDLE'da kalip hic donmuyordu.
+    // ModeCircle calls it and there that is right - in that mode the radius is the parameter
+    // itself. In AUTO the radius is set by the MISSION ITEM and check_param_change()
+    // overwrites it: _last_radius_param_m is only set inside AC_Circle::init(), and because
+    // AUTO uses the init_NEU_cm() path that field stays at 0. So the first call always
+    // thought "the parameter changed" and wrote CIRCLE_RADIUS_M into _radius_m. Measured in
+    // SITL: the item asked for 2.50 m while the vehicle turned at 10.00 m radius (the
+    // parameter value). The parameter must not overwrite the item.
+    // Set the motors to full range. This line was missing: if the circle is the mission's
+    // FIRST nav command (and the move-to-edge leg was skipped too) the spool state is never
+    // pulled to THROTTLE_UNLIMITED, the vehicle stayed in GROUND_IDLE and never turned.
     motors.set_desired_spool_state(AP_Motors::DesiredSpoolState::THROTTLE_UNLIMITED);
 
     // call circle controller
     sub.failsafe_terrain_set_status(sub.circle_nav.update_ms(aura_daire_dikey_hiz_ms()));
 
-    // Satih tavani daire bacaginda da gecerli (seyirde hedef satihtan >= 0.3 m derinde).
-    // Eskiden yalniz seyir bacaklarinda uygulaniyordu; dairenin istemeden satha
-    // cikmasina karsi hicbir koruma yoktu.
+    // The surface ceiling applies on a circle leg too (in transit the target is >= 0.3 m
+    // below the surface). It used to be applied only on transit legs; there was no
+    // protection at all against the circle surfacing unintentionally.
     aura_daire_satih_tavani_uygula(position_control, sub.circle_nav);
 
     float lateral_out, forward_out;
@@ -482,38 +482,38 @@ void ModeAuto::auto_circle_run()
                                                           aura_daire_yaw_cd(), true);
 }
 
-// Dairede burnun nereye bakacagi. MAV_CMD_AURA_CIRCLE item basina secer;
-// NAV_LOITER_TURNS her zaman kip 0 kurar, yani eski davranis birebir korunur.
+// Where the nose points during a circle. MAV_CMD_AURA_CIRCLE selects it per item;
+// NAV_LOITER_TURNS always sets mode 0, so the old behaviour is preserved exactly.
 float ModeAuto::aura_daire_yaw_cd()
 {
-    // Gorev ACIKCA bir yon soylediyse (CONDITION_YAW ya da DO_SET_ROI) o kazanir.
+    // If the mission EXPLICITLY states a heading (CONDITION_YAW or DO_SET_ROI) that wins.
     //
-    // Eskiden dairede auto_yaw_mode tamamen yok sayiliyordu ve bu yalniz "ROI calismaz"
-    // demek degildi: verify_yaw(), bas aci hedefe 2 derece yaklasana kadar false doner.
-    // Daire o hedefi hic uygulamadigi icin kosul asla saglanmiyor, _flags.do_cmd_loaded
-    // true'da takiliyor ve o nav bloğundaki SONRAKI TUM do-komutlari (deklansor dahil)
-    // hic calismiyordu.
+    // auto_yaw_mode used to be ignored entirely during a circle, and that did not just mean
+    // "ROI does not work": verify_yaw() returns false until the heading is within 2 degrees
+    // of the target. Because the circle never applied that target the condition was never
+    // met, _flags.do_cmd_loaded got stuck at true and ALL SUBSEQUENT do-commands in that nav
+    // block (including the shutter) never ran at all.
     if (sub.auto_yaw_mode == AUTO_YAW_ROI || sub.auto_yaw_mode == AUTO_YAW_LOOK_AT_HEADING) {
         return get_auto_heading();
     }
 
-    // AC_Circle::update_ms, CIRCLE_OPTIONS bit 1 acikken get_yaw_cd()'ye +/-90 dereceyi
-    // KENDISI ekliyor. Kendi tegetini hesaplayan bir cagirici bunu bilmezse acıyı iki
-    // kez uygular: kip 3 tam ters yone (180 hata), kip 0 ise 90 derece yana bakar.
+    // When CIRCLE_OPTIONS bit 1 is set, AC_Circle::update_ms adds the +/-90 degrees to
+    // get_yaw_cd() ITSELF. A caller computing its own tangent that does not know this applies
+    // the angle twice: mode 3 points exactly the wrong way (180 error), mode 0 looks 90 to the side.
     const bool kutuphane_teget = sub.circle_nav.face_direction_of_travel();
-    // Isaret AC_Circle ile birebir ayni: pozitif hiz -> -90, negatif hiz -> +90.
+    // The sign is exactly the same as in AC_Circle: positive rate -> -90, negative rate -> +90.
     const float taraf_cd = is_negative(sub.circle_nav.get_rate_max_degs()) ? 9000.0f : -9000.0f;
 
     switch (sub.daire_yaw_kip) {
-    case 1:     // basi sabit tut (daireye girerken bakilan yon)
-    case 2:     // sabit bas acisi
+    case 1:     // hold the heading fixed (the heading when entering the circle)
+    case 2:     // fixed heading angle
         return sub.daire_yaw_cd;
 
-    case 3:     // teget: yorunge yonune bak
+    case 3:     // tangent: look along the direction of travel
         return kutuphane_teget ? sub.circle_nav.get_yaw_cd()
                                : wrap_360_cd(sub.circle_nav.get_yaw_cd() + taraf_cd);
 
-    case 0:     // merkeze bak (varsayilan)
+    case 0:     // look at the centre (default)
     default:
         return kutuphane_teget ? wrap_360_cd(sub.circle_nav.get_yaw_cd() - taraf_cd)
                                : sub.circle_nav.get_yaw_cd();
@@ -588,7 +588,7 @@ void ModeAuto::auto_loiter_run(bool honour_auto_yaw)
 
     // run waypoint and z-axis position controller
     sub.failsafe_terrain_set_status(sub.wp_nav.update_wpnav());
-    aura_satih_tavani_uygula(position_control, sub.wp_nav);   // seyirde hedef satihtan >= 0.3 m derinde (satih WP haric)
+    aura_satih_tavani_uygula(position_control, sub.wp_nav);   // in transit the target is >= 0.3 m below the surface (except a surface WP)
 
     ///////////////////////
     // update xy outputs //
@@ -611,8 +611,8 @@ void ModeAuto::auto_loiter_run(bool honour_auto_yaw)
     // the mission's do-command has no effect and verify_yaw() never reaches its target.
     // Callers that need the mission to steer the heading pass honour_auto_yaw=true;
     // this mirrors auto_wp_run() above.
-    // NOT (4.7): get_auto_heading() santiderece dondurur -> _cd varyanti sart,
-    // eksiz isim 4.7'de yok, _rad varyanti radyan bekler.
+    // NOTE (4.7): get_auto_heading() returns centidegrees -> the _cd variant is mandatory,
+    // the suffix-less name does not exist in 4.7 and the _rad variant expects radians.
     if (honour_auto_yaw && sub.auto_yaw_mode != AUTO_YAW_HOLD) {
         // roll, pitch from pilot, yaw heading from auto_heading()
         attitude_control->input_euler_angle_roll_pitch_yaw_cd(target_roll, target_pitch, get_auto_heading(), true);
@@ -817,16 +817,16 @@ bool ModeAuto::auto_terrain_recover_start()
 // Attempt recovery from terrain failsafe
 // If recovery is successful resume mission
 // If recovery fails revert to failsafe action
-// AURA: guided overlay (MAV_CMD_AURA_GUIDED_SETUP) durum makinesi.
+// AURA: the guided overlay (MAV_CMD_AURA_GUIDED_SETUP) state machine.
 //
-// ACIK iken ve CANLI bir guided setpoint varken, arac AUTO bacaginin yerine o
-// setpoint'e gider; veri susunca bacagina KALDIGI YERDEN devam eder.
+// While it is ON and a LIVE guided setpoint exists, the vehicle goes to that
+// setpoint instead of the AUTO leg; when the data goes quiet it resumes its leg
+// WHERE IT LEFT OFF.
 //
-// Yalniz NAV_WAYPOINT bacaklarinda gecerlidir. Demir, daire, satha cikis ve konum
-// sabitleme item'larinin her biri operatorun tam olarak istedigi bir seydir; bir
-// setpoint'in onlari ezmesi plani okunamaz hale getirirdi. Waypoint ise sadece
-// "su tarafa git" demek - yardimci bilgisayarin inceltmek isteyebilecegi sey tam
-// olarak budur.
+// It is only valid on NAV_WAYPOINT legs. The anchor, circle, surfacing and position
+// fix items are each exactly what the operator asked for; letting a setpoint
+// overwrite them would make the plan unreadable. A waypoint, on the other hand, only
+// says "go over there" - which is exactly what a companion computer may want to refine.
 void ModeAuto::guided_overlay_degerlendir()
 {
     const bool uygun = sub.guided_overlay_acik
@@ -834,11 +834,11 @@ void ModeAuto::guided_overlay_degerlendir()
                        && sub.guided_verisi_taze(sub.guided_overlay_zaman_ms);
 
     if (uygun && !sub.guided_overlay_etkin) {
-        // GIR: once bacagi sakla, sonra guided'a devret.
+        // ENTER: first save the leg, then hand over to guided.
         //
-        // Hedefi wp_nav'dan aliyoruz, gorev item'indan degil: do_nav_wp lat/lon==0
-        // olan bir item icin anlik konumu koyuyor, yani item'in kendisi her zaman
-        // uculuan noktayi vermiyor. wp_nav'daki cozulmus hedef dogru olan.
+        // We take the target from wp_nav, not from the mission item: do_nav_wp puts the
+        // current position in for an item with lat/lon==0, so the item itself does not
+        // always give the point actually flown. The resolved target in wp_nav is correct.
         sub.guided_overlay_wp_neu_cm = sub.wp_nav.get_wp_destination_NEU_cm();
         sub.guided_overlay_giris_ms = AP_HAL::millis();
         sub.guided_overlay_etkin = true;
@@ -852,7 +852,7 @@ void ModeAuto::guided_overlay_degerlendir()
     }
 }
 
-// Overlay'den cikip kesilen NAV_WAYPOINT bacagini geri ver.
+// Leave the overlay and hand back the interrupted NAV_WAYPOINT leg.
 void ModeAuto::guided_overlay_birak()
 {
     if (!sub.guided_overlay_etkin) {
@@ -860,30 +860,30 @@ void ModeAuto::guided_overlay_birak()
     }
     sub.guided_overlay_etkin = false;
 
-    // Bacagi yeniden kur. auto_wp_start, wp_nav'i aracin BULUNDUGU yerden ayni
-    // hedefe dogru yeniden baslatir - guided nereye goturmus olursa olsun.
-    // AP_Mission durumuna DOKUNMUYORUZ: set_current_cmd(ayni index) o bacakla
-    // paralel kosan do-komut kuyrugunu dusururdu.
+    // Rebuild the leg. auto_wp_start restarts wp_nav from WHERE THE VEHICLE IS towards
+    // the same target - wherever guided may have taken it in the meantime.
+    // We DO NOT TOUCH the AP_Mission state: set_current_cmd(the same index) would drop
+    // the do-command queue running in parallel with that leg.
     auto_wp_start(sub.guided_overlay_wp_neu_cm);
 
-    // Guard saatini overlay suresi kadar ILERI KAYDIR. Saat overlay boyunca
-    // isliyordu; kaydirmazsak uzun bir overlay, geri donuste bacagi hemen
-    // "guard time expired" ile atlatirdi.
+    // SHIFT the guard clock FORWARD by the overlay duration. The clock kept running
+    // through the overlay; without the shift a long overlay would make the leg be
+    // skipped immediately on return with "guard time expired".
     const uint32_t gecen = AP_HAL::millis() - sub.guided_overlay_giris_ms;
     sub.nav_wp_start_ms += gecen;
 
-    // Bekleme sayaci da overlay boyunca isliyordu; bacak yeniden basliyor.
+    // The hold counter was running through the overlay too; the leg starts again.
     sub.loiter_time = 0;
 
     gcs().send_text(MAV_SEVERITY_INFO, "GuidedSetup: leg resumed");
 }
 
-// NAV_ATTITUDE_TIME (42703): verilen tutumu N saniye koru.
+// NAV_ATTITUDE_TIME (42703): hold the given attitude for N seconds.
 //
-// AUV'de bunun karsiligi "kamerayi su yone doğrult ve orada bekle": bir duvara,
-// ayaga ya da tekne govdesine bakarken foto/video almak icin. Konum TUTULMAZ -
-// yalniz tutum ve dikey hiz komut edilir; akinti varsa arac suruklenir. Nokta
-// tutulmasi gerekiyorsa MAV_CMD_AURA_ANCHOR kullanilir.
+// On an AUV the equivalent of this is "point the camera that way and wait there": to take
+// photo/video while looking at a wall, a pile or a boat hull. Position is NOT HELD - only
+// attitude and vertical rate are commanded; if there is a current the vehicle drifts. If
+// the point has to be held, MAV_CMD_AURA_ANCHOR is used.
 void ModeAuto::auto_nav_attitude_time_start(const AP_Mission::Mission_Command& cmd)
 {
     nav_attitude_time.roll_deg      = cmd.content.nav_attitude_time.roll_deg;
@@ -907,16 +907,16 @@ void ModeAuto::auto_nav_attitude_time_run()
 
     motors.set_desired_spool_state(AP_Motors::DesiredSpoolState::THROTTLE_UNLIMITED);
 
-    // Konum kontrolu YOK: yatay iticiler bosta birakilir. Copter'da bu mod
-    // egim acisiyla yatay ivme urettigi icin ayrica bir sey gerekmiyor; 6 serbestlik
-    // dereceli bir AUV'de yanal/ileri iticiler ayri surulur, sifirlanmazsa bir onceki
-    // bacaktan kalan deger donmeye devam ederdi.
+    // There is NO position control: the horizontal thrusters are left idle. In Copter this
+    // mode makes horizontal acceleration out of the lean angle so nothing extra is needed;
+    // on a 6 degrees of freedom AUV the lateral/forward thrusters are driven separately, and
+    // if they are not zeroed the value left from the previous leg would keep driving them.
     motors.set_lateral(0.0f);
     motors.set_forward(0.0f);
 
-    // Copter'daki lean_angle_max kisiti BURADA UYGULANMAZ: o kisit coklu rotorda
-    // egimin ayni zamanda itki vektoru olmasindan gelir. AUV'de roll/pitch gercek
-    // tutum komutudur, kirpilmasi item'in soyledigi seyi bozar.
+    // Copter's lean_angle_max limit is NOT APPLIED HERE: that limit comes from the fact
+    // that on a multirotor the lean angle is also the thrust vector. On an AUV roll/pitch
+    // is a real attitude command, and clamping it breaks what the item asked for.
     attitude_control->input_euler_angle_roll_pitch_yaw_cd(nav_attitude_time.roll_deg * 100.0f,
                                                           nav_attitude_time.pitch_deg * 100.0f,
                                                           nav_attitude_time.yaw_deg * 100.0f,
@@ -926,9 +926,9 @@ void ModeAuto::auto_nav_attitude_time_run()
                                                 -position_control->get_max_speed_down_ms(),
                                                  position_control->get_max_speed_up_ms());
     position_control->D_set_pos_target_from_climb_rate_ms(climb_rate_ms);
-    // Satih tavani: bu komut dikey hizi DOGRUDAN suruyor ve komut edilen bir hedef
-    // derinlik yok, o yuzden terrain kurtarmasindaki gibi sabit -0.3 m tavan.
-    // Bilerek satha cikmak isteyen plan NAV_LAND kullanir.
+    // Surface ceiling: this command drives the vertical rate DIRECTLY and there is no
+    // commanded target depth, so a fixed -0.3 m ceiling as in terrain recovery.
+    // A plan that deliberately wants to surface uses NAV_LAND.
     aura_satih_tavani_cekirdek(position_control, -0.30f, true);
     position_control->D_update_controller();
 }
@@ -948,12 +948,12 @@ void ModeAuto::auto_terrain_recover_run()
         return;
     }
 
-    // Motorlari tam aralia AL. Bu satir yoktu ve spool durumu YAPISKANDIR:
-    // AP_Motors::armed() ona dokunmaz. Zemin takipli bir gorevde terrain failsafe
-    // tetiklendikten sonra arac disarm edilip tekrar arm edilirse (yukaridaki dal
-    // GROUND_IDLE yazmis olur) _spool_desired GROUND_IDLE'da kaliyor; AP_Motors6DOF
-    // o durumda tum iticilere 1500 PWM basiyor. Sonuc: arac ARM, AUTO'da, pozisyon
-    // kontrolcusu kendini komutta saniyor ama itki SIFIR - serbest suruklenme.
+    // SET the motors to full range. This line was missing and the spool state is STICKY:
+    // AP_Motors::armed() does not touch it. On a bottom-following mission, if the vehicle is
+    // disarmed and armed again after the terrain failsafe triggered (the branch above will
+    // have written GROUND_IDLE), _spool_desired stays at GROUND_IDLE; in that state
+    // AP_Motors6DOF puts 1500 PWM on all thrusters. The result: the vehicle is ARMED, in
+    // AUTO, the position controller thinks it is in command, but thrust is ZERO - free drift.
     motors.set_desired_spool_state(AP_Motors::DesiredSpoolState::THROTTLE_UNLIMITED);
 
 #if AP_RANGEFINDER_ENABLED
@@ -1007,10 +1007,10 @@ void ModeAuto::auto_terrain_recover_run()
 #else
     gcs().send_text(MAV_SEVERITY_CRITICAL, "Terrain failsafe recovery failure: No Rangefinder!");
     sub.failsafe_terrain_act();
-    // failsafe_terrain_act() MOD DEGISTIRIR (POSHOLD/ALT_HOLD/SURFACE) ya da disarm
-    // eder. return olmadan bu fonksiyon devam edip yeni modun init()'inin az once
-    // kurdugu pozisyon/attitude hedeflerini ustune yaziyordu. Yukaridaki
-    // "No Rangefinder" dali return'u zaten dogru yapiyor; eksik olan bu ikisiydi.
+    // failsafe_terrain_act() CHANGES MODE (POSHOLD/ALT_HOLD/SURFACE) or disarms. Without
+    // the return this function carried on and overwrote the position/attitude targets the
+    // new mode's init() had just set up. The "No Rangefinder" branch above already gets
+    // its return right; these two were the ones that were missing it.
     return;
 #endif
 
@@ -1019,7 +1019,7 @@ void ModeAuto::auto_terrain_recover_run()
         // Recovery has failed, revert to failsafe action
         gcs().send_text(MAV_SEVERITY_CRITICAL, "Terrain failsafe recovery timeout!");
         sub.failsafe_terrain_act();
-        return;     // yukaridaki gerekce
+        return;     // the rationale above
     }
 
     // run loiter controller
@@ -1037,11 +1037,11 @@ void ModeAuto::auto_terrain_recover_run()
     /////////////////////
     // update z target //
     position_control->D_set_pos_target_from_climb_rate_cms(target_climb_rate);
-    // Satih tavani BURADA en cok gerekiyor: OutOfRangeLow dali WPNAV_SPEED_UP ile
-    // YUKARI tirmaniyor ve sig suda tabana yakin bir arac tam olarak OutOfRangeLow
-    // bildirir. Tavan yoksa kurtarma, FS_TERRAIN_RECOVER_TIMEOUT_MS boyunca tirmanip
-    // araci satha cikarir - hem de tavanin var olma sebebi olan (terrain-frame /
-    // SURFTRAK) konfigurasyonda. Komut edilen hedef yok, o yuzden sabit -0.3 m.
+    // The surface ceiling is needed most HERE: the OutOfRangeLow branch climbs UP at
+    // WPNAV_SPEED_UP, and in shallow water a vehicle near the bottom reports exactly
+    // OutOfRangeLow. Without a ceiling the recovery climbs for the whole
+    // FS_TERRAIN_RECOVER_TIMEOUT_MS and surfaces the vehicle - in the very configuration
+    // (terrain-frame / SURFTRAK) the ceiling exists for. No commanded target, so fixed -0.3 m.
     aura_satih_tavani_cekirdek(position_control, -0.30f, true);
     position_control->D_update_controller();
 

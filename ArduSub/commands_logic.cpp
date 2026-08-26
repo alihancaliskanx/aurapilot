@@ -21,14 +21,14 @@ bool Sub::start_command(const AP_Mission::Mission_Command& cmd)
     // NAV_SET_YAW_SPEED, AURA_ANCHOR and AURA_POSITION_FIX are nav commands without a
     // Location.
     // stored_in_location() is the correct predicate.
-    // NAV_GUIDED_ENABLE stored_in_location listesindedir ama tasidigi Location
-    // ATIL: do_nav_guided_enable yalnizca cmd.p1'i (ac/kapa bayragi) okur, irtifaya
-    // hic bakmaz. Kapiya takilmasi gercek bir kusurdu: mavui (ve stok QGC) bu komutu
-    // koordinat/irtifa BILDIRMEDEN tanimladigi icin SimpleMissionItem ona
-    // MAV_FRAME_MISSION veriyor; o cerceve ABSOLUTE'a cozuluyor, kapi "Bad alt frame"
-    // deyip start_command false donduruyor ve AP_Mission komutu SESSIZCE ATLIYOR.
-    // Yani menuden konan "Guided enable" hicbir sey yapmiyordu. SITL'de olculdu:
-    // "Mission: 2 GuidedEnable" hemen ardindan "Bad alt frame", sonra bir sonraki item.
+    // NAV_GUIDED_ENABLE is on the stored_in_location list, but the Location it carries is
+    // JUNK: do_nav_guided_enable only reads cmd.p1 (the on/off flag) and never looks at
+    // the altitude. Getting caught by the gate was a real defect: because mavui (and stock
+    // QGC) define this command WITHOUT DECLARING a coordinate/altitude, SimpleMissionItem
+    // gives it MAV_FRAME_MISSION; that frame resolves to ABSOLUTE, the gate says "Bad alt
+    // frame", start_command returns false and AP_Mission SILENTLY SKIPS the command.
+    // So a "Guided enable" placed from the menu did nothing at all. Measured in SITL:
+    // "Mission: 2 GuidedEnable" immediately followed by "Bad alt frame", then the next item.
     const bool irtifasi_atil = (cmd.id == MAV_CMD_NAV_GUIDED_ENABLE);
 
     if (AP_Mission::is_nav_cmd(cmd) && AP_Mission::stored_in_location(cmd.id) && !irtifasi_atil) {
@@ -61,9 +61,9 @@ bool Sub::start_command(const AP_Mission::Mission_Command& cmd)
         break;
 
     case MAV_CMD_NAV_LAND:              // 21 LAND to Waypoint
-    case MAV_CMD_NAV_VTOL_LAND:         // 85 - Copter'da da NAV_LAND'in takma adi.
-                                        // QGC bazi planlarda bunu uretiyor; kabul
-                                        // etmezsek satha cikis item'i sessizce atlanir.
+    case MAV_CMD_NAV_VTOL_LAND:         // 85 - an alias of NAV_LAND in Copter as well.
+                                        // QGC emits this in some plans; if we do not
+                                        // accept it the surfacing item is silently skipped.
         do_surface(cmd);
         break;
 
@@ -79,19 +79,19 @@ bool Sub::start_command(const AP_Mission::Mission_Command& cmd)
         do_circle(cmd);
         break;
 
-    case AP_Mission::MAV_CMD_AURA_CIRCLE:       // 31020 daire, kendi parametreleriyle
+    case AP_Mission::MAV_CMD_AURA_CIRCLE:       // 31020 circle, with its own parameters
         do_aura_circle(cmd);
         break;
 
-    case MAV_CMD_NAV_ATTITUDE_TIME:            // 42703 tutumu N saniye koru
+    case MAV_CMD_NAV_ATTITUDE_TIME:            // 42703 hold the attitude for N seconds
         mode_auto.auto_nav_attitude_time_start(cmd);
         break;
 
-    case AP_Mission::MAV_CMD_AURA_GUIDED_MISSION:  // 31025 bacagi dis bilgisayara ver
+    case AP_Mission::MAV_CMD_AURA_GUIDED_MISSION:  // 31025 hand the leg to the external computer
         do_aura_guided_mission(cmd);
         break;
 
-    case AP_Mission::MAV_CMD_AURA_GUIDED_SETUP:    // 31030 guided overlay ac/kapa (DO)
+    case AP_Mission::MAV_CMD_AURA_GUIDED_SETUP:    // 31030 turn the guided overlay on/off (DO)
         do_aura_guided_setup(cmd);
         break;
 
@@ -162,12 +162,12 @@ bool Sub::start_command(const AP_Mission::Mission_Command& cmd)
         break;
 #endif
 
-    // Isaretci komutlar: kendileri bir sey YAPMAZ, plandaki bir yeri isaretlerler.
-    // AP_Mission bayraklari (in_landing_sequence / in_return_path) zaten kendisi
-    // kuruyor; ArduSub'in tek yapmasi gereken komutu tanimak. Tanimadigi icin
-    // QGC'nin standart olarak urettigi her inis dizisi planinda item BASINA IKI
-    // uyari basiliyordu ("Ignoring command 189" + "Skipping invalid cmd #189"),
-    // operator de gercek hatalari bu gurultunun icinde kaybediyordu.
+    // Marker commands: they DO nothing themselves, they mark a place in the plan.
+    // AP_Mission sets its flags (in_landing_sequence / in_return_path) by itself;
+    // all ArduSub has to do is recognise the command. Because it did not, every
+    // landing sequence plan QGC produces as standard printed TWO warnings PER ITEM
+    // ("Ignoring command 189" + "Skipping invalid cmd #189"), and the operator lost
+    // real errors inside that noise.
     case MAV_CMD_DO_LAND_START:             // 189
     case MAV_CMD_DO_RETURN_PATH_START:      // 188
         break;
@@ -274,17 +274,17 @@ bool Sub::verify_command(const AP_Mission::Mission_Command& cmd)
     case MAV_CMD_DO_MOUNT_CONTROL:
     case MAV_CMD_DO_SET_CAM_TRIGG_DIST:
     case MAV_CMD_DO_GUIDED_LIMITS:
-    // Isaretciler - start_command tarafindaki gerekceye bak.
+    // Markers - see the rationale on the start_command side.
     case MAV_CMD_DO_LAND_START:             // 189
     case MAV_CMD_DO_RETURN_PATH_START:      // 188
-    // DO_FENCE_ENABLE'i AP_Mission::start_command kendisi yakalar (start_command_fence),
-    // yani bu arac fonksiyonuna hic ulasmaz - ama AP_Mission::verify_command onu
-    // yakalamaz, buraya DUSER. Case yoksa cit gercekten acilip kapanirken ekrana
-    // "Skipping invalid cmd #207" basiliyordu. Copter'da da tam olarak bu sebeple
-    // yalniz verify tarafinda bir case var.
+    // AP_Mission::start_command catches DO_FENCE_ENABLE itself (start_command_fence),
+    // so it never reaches this vehicle function - but AP_Mission::verify_command does
+    // not catch it, and it FALLS THROUGH to here. Without the case, "Skipping invalid
+    // cmd #207" was printed on screen while the fence really was being enabled/disabled.
+    // Copter has a case only on the verify side for exactly this reason.
     case MAV_CMD_DO_FENCE_ENABLE:           // 207
-    // Guided overlay ac/kapa: bir DO komutu, gorevi bloklamaz. Buraya EKLENMEZSE
-    // her dongude "Skipping invalid cmd #31030" basardi.
+    // Guided overlay on/off: a DO command, it does not block the mission. If it were NOT
+    // ADDED here it would print "Skipping invalid cmd #31030" on every loop.
     case AP_Mission::MAV_CMD_AURA_GUIDED_SETUP:
         return true;
 
@@ -341,9 +341,9 @@ void Sub::do_nav_wp(const AP_Mission::Mission_Command& cmd)
     aura_nav_guard_kur(loiter_time_max);
 }
 
-// AURA: seyir bacagi icin guard butcesi kur. Butce, duz hat seyir suresinin uc kati
-// arti bekleme suresi, asla bir dakikanin altinda degil (gerekce do_nav_wp'de).
-// do_nav_wp ve do_RTL ayni butceyi kullanir; formul tek yerde dursun diye ayrildi.
+// AURA: set up the guard budget for a transit leg. The budget is three times the straight-
+// line travel time plus the hold, never under a minute (rationale in do_nav_wp).
+// do_nav_wp and do_RTL use the same budget; split out so the formula lives in one place.
 void Sub::aura_nav_guard_kur(uint32_t bekleme_s)
 {
     nav_wp_start_ms = AP_HAL::millis();
@@ -354,7 +354,7 @@ void Sub::aura_nav_guard_kur(uint32_t bekleme_s)
                           60000UL);
 }
 
-// Guard suresi doldu mu? (0 = guard yok)
+// Has the guard time expired? (0 = no guard)
 bool Sub::aura_nav_guard_doldu() const
 {
     return nav_wp_guard_ms != 0 && AP_HAL::millis() - nav_wp_start_ms >= nav_wp_guard_ms;
@@ -395,48 +395,48 @@ void Sub::do_surface(const AP_Mission::Mission_Command& cmd)
     // Go to wp location
     mode_auto.auto_wp_start(target_location);
 
-    // Satha cikis da ulasilamayabilir (negatif yuzerlik, aga takilma, buz).
-    // Guard olmadan gorev orada kalici olarak park ederdi.
+    // Surfacing can be unreachable too (negative buoyancy, snagged in a net, ice).
+    // Without a guard the mission would park there permanently.
     aura_nav_guard_kur(0);
 }
 
 void Sub::do_RTL()
 {
-    // AURA: eve MEVCUT DERINLIKTE donulur, satha cikilmaz.
+    // AURA: home is returned to AT THE CURRENT DEPTH, without surfacing.
     //
-    // Eskiden burada dogrudan ahrs.get_home() vardi ve bu araci SATHA cikariyordu:
-    // Sub::set_home_to_current_location (commands.cpp) ev noktasini bilerek su
-    // yuzeyine tasir ("Make home always at the water's surface", derinlikte
-    // disarm/arm yapilabilsin diye), yani get_home().alt HER ZAMAN 0'dir. Hedef
-    // olarak verilince arac eve giderken ayni zamanda derinlik 0'a tirmaniyordu -
-    // uc kere yanlis: (1) satihta YATAY seyir, AURA kuralinin tam olarak yasakladigi
-    // sey; (2) satih tavani da devreye girmiyor, cunku tavan komut edilen hedefi
-    // "bilerek istenmis satha cikis" sayip kendini aciyor (mode_auto.cpp); (3)
-    // RETURN_TO_LAUNCH bir Location tasimadigi icin start_command'in irtifa-cercevesi
-    // denetimi de bu komutu hic gormuyor. SITL'de olculdu: -10 m'den -0.04 m'ye
-    // duzgun bir tirmanis.
+    // This used to be a plain ahrs.get_home() and that SURFACED the vehicle:
+    // Sub::set_home_to_current_location (commands.cpp) deliberately moves the home point
+    // to the water surface ("Make home always at the water's surface", so that disarm/arm
+    // at depth is possible), i.e. get_home().alt is ALWAYS 0. Given as the target, the
+    // vehicle climbed to depth 0 while it travelled home - wrong three times over:
+    // (1) HORIZONTAL transit at the surface, exactly what the AURA rule forbids; (2) the
+    // surface ceiling does not engage either, because the ceiling counts the commanded
+    // target as a "deliberately requested surfacing" and opens itself (mode_auto.cpp);
+    // (3) because RETURN_TO_LAUNCH carries no Location, start_command's altitude-frame
+    // check never sees this command either. Measured in SITL: a clean climb from -10 m
+    // to -0.04 m.
     //
-    // Satha cikmak isteyen plan bunu ACIKCA soyler: RTL'den sonra NAV_LAND (do_surface).
-    // DERINLIGI DONUSTURMEDEN, YENIDEN ETIKETLEYEREK al - do_surface (yukarida) da
-    // birebir boyle yapiyor.
+    // A plan that wants to surface says so EXPLICITLY: NAV_LAND after the RTL (do_surface).
+    // Take the depth WITHOUT CONVERTING IT, BY RE-LABELLING - do_surface (above) does
+    // exactly the same thing.
     //
-    // get_alt_cm(ABOVE_HOME) BURADA YANLIS OLUR ve denenip geri alindi: current_loc.alt
-    // aslinda EKF ORIJININE gore yukseklik (read_inertia: inertial_nav.get_position_z_up_cm())
-    // ama current_loc varsayilan kurulmus oldugu icin cerceve bayraklari 0, yani
-    // "ABSOLUTE" der. Gercek bir donusum bu sayiyi AMSL sanip ev irtifasini cikarir;
-    // hedef sonra ABOVE_ORIGIN'e cevrilirken orijin irtifasi da cikar. Net hata tam
-    // olarak EKF ORIJININ AMSL IRTIFASI kadardir: deniz seviyesinde 0 (bu yuzden
-    // SITL'de --home ...,0 ile GORUNMEZ), 584 m rakimli bir golde ise -10 m'lik bir
-    // RTL "594 m derinlige in" komutuna doner. Tum ArduSub bu yanlis etiketle yasar
-    // ve sayiyi donusturmez, yeniden etiketler; buranin da oyle yapmasi sart.
+    // get_alt_cm(ABOVE_HOME) WOULD BE WRONG HERE and was tried and reverted: current_loc.alt
+    // is really a height relative to the EKF ORIGIN (read_inertia: inertial_nav.get_position_z_up_cm())
+    // but because current_loc is default-constructed its frame flags are 0, i.e. it says
+    // "ABSOLUTE". A real conversion takes that number for AMSL and subtracts the home altitude;
+    // then, converting the target to ABOVE_ORIGIN, the origin altitude is subtracted too. The
+    // net error is exactly the AMSL ALTITUDE OF THE EKF ORIGIN: 0 at sea level (which is why
+    // it is INVISIBLE in SITL with --home ...,0), while on a lake at 584 m elevation a -10 m
+    // RTL turns into "descend to 594 m depth". All of ArduSub lives with this wrong label and
+    // re-labels the number instead of converting it; this place has to do the same.
     Location target_loc(ahrs.get_home());
     target_loc.set_alt_cm(current_loc.alt, Location::AltFrame::ABOVE_HOME);
 
     mode_auto.auto_wp_start(target_loc);
 
-    // verify_RTL'in de bir kacis kapisi olsun (verify_nav_wp ile ayni gerekce):
-    // reached_wp_destination() tek yonlu bir mandal, ulasilamayan bir eve giden RTL
-    // gorevi kalici olarak park ediyordu.
+    // Give verify_RTL an escape gate as well (the same rationale as verify_nav_wp):
+    // reached_wp_destination() is a one-way latch, and an RTL towards an unreachable
+    // home parked the mission permanently.
     aura_nav_guard_kur(0);
 }
 
@@ -460,12 +460,12 @@ void Sub::do_loiter_unlimited(const AP_Mission::Mission_Command& cmd)
     // start way point navigator and provide it the desired location
     mode_auto.auto_wp_start(target_loc);
 
-    // NAV_LOITER_UNLIM'in verify'i HIC true donmez - komutun anlami bu. Ama bu,
-    // bu dosyadaki tek kacissiz nav komutu demek: diger her sey ya tamamlanir ya
-    // da guard tavaniyla dusar. GCS'siz bir gorevde (FS_GCS_ENABLE=0) modu
-    // degistirecek operator de yoktur; arac batarya failsafe'ine kadar bekler.
-    // Davranis DEGISTIRILMEDI (komutun tanimi bu), ama sessiz kalmasi yanlis:
-    // QGC'nin "Loiter" deseni bunu operator planina kolayca sokuyor.
+    // NAV_LOITER_UNLIM's verify NEVER returns true - that is what the command means. But it
+    // also means this is the only nav command in this file with no escape: everything else
+    // either completes or falls out on the guard ceiling. On a mission with no GCS
+    // (FS_GCS_ENABLE=0) there is no operator to change the mode either; the vehicle waits
+    // until the battery failsafe. The behaviour was NOT CHANGED (that is the command's
+    // definition), but staying silent is wrong: QGC's "Loiter" pattern drops this into plans easily.
     gcs().send_text(MAV_SEVERITY_WARNING,
                     "LoiterUnlim: mission holds here until the mode is changed");
 }
@@ -483,9 +483,9 @@ void Sub::do_circle(const AP_Mission::Mission_Command& cmd)
     }
     // calculate radius
     uint16_t circle_radius_m = HIGHBYTE(cmd.p1); // circle radius held in high byte of p1
-    // x10 olcegi NAV_LOITER_TURNS'e ozgu bir depolama numarasi (AP_Mission.cpp:1140).
-    // type_specific_bits baska komutlarda baska anlama gelebilir, o yuzden Copter gibi
-    // komut kimligi de kontrol edilir.
+    // The x10 scale is a storage trick specific to NAV_LOITER_TURNS (AP_Mission.cpp:1140).
+    // type_specific_bits can mean something else on other commands, so like Copter we
+    // check the command id as well.
     if (cmd.id == MAV_CMD_NAV_LOITER_TURNS && (cmd.type_specific_bits & (1U << 0))) {
         circle_radius_m *= 10;
     }
@@ -494,27 +494,27 @@ void Sub::do_circle(const AP_Mission::Mission_Command& cmd)
     // true if circle should be ccw
     const bool circle_direction_ccw = cmd.content.location.loiter_ccw;
 
-    // NAV_LOITER_TURNS item basina hiz TASIYAMAZ (p1 dolu, bkz. MAV_CMD_AURA_CIRCLE
-    // aciklamasi), o yuzden buyukluk parametreden gelir; item yalnizca yonu soyler.
+    // NAV_LOITER_TURNS CANNOT CARRY a per-item rate (p1 is full, see the MAV_CMD_AURA_CIRCLE
+    // description), so the magnitude comes from the parameter; the item only says the direction.
     const float rate_degs = circle_direction_ccw ? -fabsf(circle_nav.get_rate_degs())
                                                  :  fabsf(circle_nav.get_rate_degs());
 
-    // Bu komut yaw kipi tasimaz: klasik davranis "merkeze bak".
+    // This command carries no yaw mode: the classic behaviour is "look at the centre".
     daire_yaw_kip = 0;
     daire_tur_hedefi = cmd.get_loiter_turns();
 
     // move to edge of circle (verify_circle) will ensure we begin circling once we reach the edge
     mode_auto.auto_circle_movetoedge_start(circle_center, circle_radius_m, rate_degs);
 
-    // Kenara gitme bacagi icin guard (AURA_CIRCLE'da da ayni).
+    // Guard for the move-to-edge leg (the same in AURA_CIRCLE).
     aura_nav_guard_kur(0);
 }
 
-// AURA: bir index'ten itibaren, konum TASIYAN ilk nav komutunu bul.
+// AURA: starting from an index, find the first nav command that CARRIES a Location.
 //
-// do_position_fix'teki yuruteci ile ayni: konum tasimayan nav komutlarinin (demir,
-// NAV_DELAY, daire) ustunden atlar ve DO_JUMP'in geriye zincirlemesine karsi hop
-// sayisiyla sinirlidir.
+// The same walker as the one in do_position_fix: it steps over nav commands that carry
+// no Location (anchor, NAV_DELAY, circle) and is bounded by a hop count against DO_JUMP
+// chaining backwards.
 bool Sub::aura_sonraki_konumlu_wp(uint16_t index, Location &konum)
 {
     AP_Mission::Mission_Command next;
@@ -535,17 +535,17 @@ bool Sub::aura_sonraki_konumlu_wp(uint16_t index, Location &konum)
     return false;
 }
 
-// AURA: MAV_CMD_AURA_CIRCLE - daire, CIRCLE modunun kendi parametreleriyle.
+// AURA: MAV_CMD_AURA_CIRCLE - a circle with CIRCLE mode's own parameters.
 void Sub::do_aura_circle(const AP_Mission::Mission_Command& cmd)
 {
     const AP_Mission::Aura_Circle_Command &d = cmd.content.aura_circle;
 
-    // ---- merkez ----
-    // Komut bir Location TASIMAZ (16 bitlik id -> 10 bayt, PackedLocation 12 bayt
-    // ister). Varsayilan merkez, item basladigindaki arac konumudur: normal kullanim
-    // "hedefe git, sonra etrafinda don" oldugu icin bu zaten dogru noktadir.
-    // centre_from_wp ile merkez, plandaki bir sonraki konumlu nav komutundan okunur
-    // (AURA_POSITION_FIX'in kullandigi yontem).
+    // ---- centre ----
+    // The command DOES NOT CARRY a Location (a 16 bit id -> 10 bytes, PackedLocation needs
+    // 12). The default centre is the vehicle position when the item starts: since normal
+    // use is "go to the target, then circle around it", that is already the right point.
+    // With centre_from_wp the centre is read from the next nav command in the plan that
+    // carries a location (the method AURA_POSITION_FIX uses).
     Location merkez(current_loc);
     if (d.centre_from_wp) {
         Location wp_konum;
@@ -558,16 +558,16 @@ void Sub::do_aura_circle(const AP_Mission::Mission_Command& cmd)
         }
     }
 
-    // ---- derinlik ----
-    // 0 = "irtifa verilmedi, mevcut derinligi koru" (do_nav_wp ile ayni gelenek).
+    // ---- depth ----
+    // 0 = "no altitude given, keep the current depth" (the same convention as do_nav_wp).
     //
-    // POZITIF derinlik REDDEDILIR. Bu komut bir Location tasimadigi icin
-    // start_command'in basindaki irtifa-cercevesi denetiminden GECMEZ
-    // (stored_in_location degil), yani "Alt above home must be negative" korumasi ona
-    // ulasmaz. Korumasiz birakilamaz: satih tavani komut edilen hedefi "bilerek
-    // istenmis satha cikis" sayip kendini ona ACAR, dolayisiyla plan ureticisindeki
-    // bir isaret hatasi (z=+3 yerine -3) araci satihta, surekli yukari itkiyle bir tam
-    // tur dondururdu - AURA'nin acikca yasakladigi sey.
+    // A POSITIVE depth is REJECTED. Because this command carries no Location it DOES NOT
+    // GO THROUGH the altitude-frame check at the top of start_command (it is not
+    // stored_in_location), so the "Alt above home must be negative" guard does not reach
+    // it. It cannot be left unguarded: the surface ceiling counts the commanded target as
+    // a "deliberately requested surfacing" and OPENS itself to it, so a sign error in the
+    // plan generator (z=+3 instead of -3) would turn the vehicle a full circle at the
+    // surface with constant upward thrust - the thing AURA explicitly forbids.
     if (d.depth_cm > 0) {
         gcs().send_text(MAV_SEVERITY_WARNING, "Circle: alt above home must be negative");
         return;
@@ -575,25 +575,25 @@ void Sub::do_aura_circle(const AP_Mission::Mission_Command& cmd)
     merkez.set_alt_cm(d.depth_cm != 0 ? d.depth_cm : current_loc.alt,
                       Location::AltFrame::ABOVE_HOME);
 
-    // ---- yaw kipi ----
-    // Kip 2 sabit bir yon ister; yon verilmemisse (x < 0, demirle ayni gelenek)
-    // "merkeze bak"a duselim. Aksi halde -1 sessizce 0'a, yani KUZEY'e donerdi.
+    // ---- yaw mode ----
+    // Mode 2 wants a fixed heading; if none was given (x < 0, the same convention as the
+    // anchor) fall back to "look at the centre". Otherwise -1 silently became 0, i.e. NORTH.
     daire_yaw_kip = (d.yaw_mode == 2 && !d.yaw_valid) ? 0 : d.yaw_mode;
     daire_yaw_cd = d.yaw_deg * 100.0f;
-    // AC_Circle'in kendi yaw'i (merkeze bakma) yalniz kip 0 ve 3'te kullanilir;
-    // digerlerinde auto_circle_run bu degeri kullanir.
+    // AC_Circle's own yaw (facing the centre) is used only in modes 0 and 3;
+    // in the others auto_circle_run uses this value.
 
-    // ---- tur sayisi ----
+    // ---- number of turns ----
     daire_tur_hedefi = (d.turns_centi > 0) ? d.turns_centi * 0.01f : 1.0f;
 
     const float yaricap_m = d.radius_cm * 0.01f;    // 0 -> CIRCLE_RADIUS_M
-    const float rate_degs = d.rate_cdegs * 0.01f;   // 0 -> CIRCLE_RATE (isaretiyle)
+    const float rate_degs = d.rate_cdegs * 0.01f;   // 0 -> CIRCLE_RATE (with its sign)
 
-    // NOT: istenen acisal hiz bir UST SINIRDIR. AC_Circle::calc_velocities onu ayrica
-    // pozisyon kontrolcusunun hiz/ivme limitleriyle kirpar: ulasilabilir en yuksek hiz
-    // kabaca WP_SPD / yaricap'tir. WP_SPD=0.6 m/s ile 0.5 m yaricapta ~69 deg/s
-    // mumkunken 10 m yaricapta ~3.4 deg/s'de doyar. Buyuk yaricapli bir dairede
-    // istenen hizin tutmamasi hata degil, bu sinirdir.
+    // NOTE: the requested angular rate is an UPPER LIMIT. AC_Circle::calc_velocities also
+    // clamps it with the position controller's speed/acceleration limits: the highest
+    // achievable rate is roughly WP_SPD / radius. With WP_SPD=0.6 m/s about ~69 deg/s is
+    // possible at a 0.5 m radius, while at a 10 m radius it saturates at ~3.4 deg/s. On a
+    // large-radius circle the requested rate not holding is not a bug, it is this limit.
     gcs().send_text(MAV_SEVERITY_INFO, "Circle: r=%.2fm %.2fdeg/s %.2f turns",
                     (double)(is_zero(yaricap_m) ? circle_nav.get_radius_parm_m() : yaricap_m),
                     (double)(is_zero(rate_degs) ? circle_nav.get_rate_degs() : rate_degs),
@@ -601,7 +601,7 @@ void Sub::do_aura_circle(const AP_Mission::Mission_Command& cmd)
 
     mode_auto.auto_circle_movetoedge_start(merkez, yaricap_m, rate_degs);
 
-    // Kenara gitme bacagi olusabilir; guard butcesi o bacak icin.
+    // A move-to-edge leg may be created; the guard budget is for that leg.
     aura_nav_guard_kur(0);
 }
 
@@ -616,8 +616,8 @@ void Sub::do_loiter_time(const AP_Mission::Mission_Command& cmd)
     loiter_time     = 0;
     loiter_time_max = cmd.p1;     // units are (seconds)
 
-    // verify_nav_wp ile ayni gerekce: reached_wp_destination() tek yonlu bir
-    // mandal, ulasilamayan bir noktada gorev kalici olarak park ederdi.
+    // The same rationale as verify_nav_wp: reached_wp_destination() is a one-way
+    // latch, and on an unreachable point the mission would park permanently.
     aura_nav_guard_kur(loiter_time_max);
 }
 
@@ -807,14 +807,14 @@ void Sub::do_guided_limits(const AP_Mission::Mission_Command& cmd)
 // verify_nav_wp - check if we have reached the next way point
 bool Sub::verify_nav_wp(const AP_Mission::Mission_Command& cmd)
 {
-    // Guided overlay devredeyken bu bacak ILERLEMEZ.
+    // While the guided overlay is engaged this leg DOES NOT ADVANCE.
     //
-    // Bu bir suslemek degil, ZORUNLULUK: overlay Guided_WP alt-modunu kullaniyor ve
-    // o alt-mod wp_nav'in hedefini GUIDED noktasiyla degistiriyor. Dolayisiyla
-    // reached_wp_destination() guided hedefine gore mandallanir ve asagidaki kontrol
-    // "gercek waypoint'e varildi" sanip gorevi ilerletirdi - arac oraya hic
-    // gitmemisken. mission.update() overlay sirasinda da kosmaya devam ettigi icin
-    // bu kacinilmazdi.
+    // This is not decoration, it is a NECESSITY: the overlay uses the Guided_WP sub-mode
+    // and that sub-mode replaces wp_nav's target with the GUIDED point. So
+    // reached_wp_destination() latches against the guided target and the check below
+    // would think "the real waypoint was reached" and advance the mission - while the
+    // vehicle never went there at all. Because mission.update() keeps running during the
+    // overlay as well, this was unavoidable.
     if (guided_overlay_etkin) {
         return false;
     }
@@ -874,9 +874,9 @@ bool Sub::verify_surface(const AP_Mission::Mission_Command& cmd)
 
                 mode_auto.auto_wp_start(target_location);
 
-                // Guard'i IKINCI bacak icin yeniden kur. do_surface'te kurulan
-                // butce yalniz ilk bacagin (konuma gitme) uzunlugundan hesaplanmisti;
-                // derin bir tirmanis onu asabilir ve gorev sebepsiz dusrdu.
+                // Set the guard up again for the SECOND leg. The budget set in do_surface
+                // was computed only from the length of the first leg (go to location);
+                // a deep climb can exceed it and the mission would drop out for no reason.
                 aura_nav_guard_kur(0);
 
                 // advance to next state
@@ -901,31 +901,31 @@ bool Sub::verify_surface(const AP_Mission::Mission_Command& cmd)
     return retval;
 }
 
-// AURA: guided verisi son esik_ms icinde geldi mi?
+// AURA: did guided data arrive within the last esik_ms?
 bool Sub::guided_verisi_taze(uint32_t esik_ms) const
 {
     if (guided_veri_ms == 0) {
-        return false;       // hic gelmedi
+        return false;       // never arrived
     }
     return (AP_HAL::millis() - guided_veri_ms) <= esik_ms;
 }
 
 // AURA: MAV_CMD_AURA_GUIDED_MISSION (31025)
 //
-// Bacagi dis bilgisayara devreder ve o SUSUNCA gorevi surdurur.
+// Hands the leg to the external computer and resumes the mission when it GOES QUIET.
 //
-// NAV_GUIDED_ENABLE (92) de kontrolu devrediyor ama TEK cikisi bir
-// DO_GUIDED_LIMITS ihlali: onune limit konmazsa gorev o item'da SONSUZA KADAR
-// park eder ve veri kesilmesi diye bir cikis hic yoktur. Dalis ortasinda yeniden
-// baslayabilen bir yardimci bilgisayar icin bu yanlis basarisizlik bicimi.
+// NAV_GUIDED_ENABLE (92) also hands over control, but its ONLY exit is a
+// DO_GUIDED_LIMITS violation: if no limit is placed in front of it the mission parks on
+// that item FOR EVER, and there is no data-loss exit at all. For a companion computer
+// that can restart in the middle of a dive that is the wrong failure mode.
 void Sub::do_aura_guided_mission(const AP_Mission::Mission_Command& cmd)
 {
-    // Auto_NavGuided alt-modu: MOD DEGISMEZ, arac AUTO'da kalir. Mod degistirmek
-    // gorevi dondururdu - verify_command_callback AUTO disinda daima false doner.
+    // The Auto_NavGuided sub-mode: THE MODE DOES NOT CHANGE, the vehicle stays in AUTO.
+    // Changing mode would freeze the mission - verify_command_callback always returns false outside AUTO.
     mode_auto.auto_nav_guided_start();
 
-    // Sayaci bu andan baslat. Damgayi SIFIRLAMIYORUZ: item'dan hemen once gelmis
-    // bir setpoint de gecerli sayilmali.
+    // Start the counter from this moment. We DO NOT RESET the stamp: a setpoint that
+    // arrived just before the item must count as valid too.
     nav_wp_start_ms = AP_HAL::millis();
 
     gcs().send_text(MAV_SEVERITY_INFO, "GuidedMission: waiting for setpoints");
@@ -938,17 +938,17 @@ bool Sub::verify_aura_guided_mission(const AP_Mission::Mission_Command& cmd)
                              ? cmd.content.aura_guided_mission.timeout_ms
                              : 3000;
 
-    // Azami sure tavani (0 = tavan yok).
+    // Maximum time ceiling (0 = no ceiling).
     const uint16_t azami_s = cmd.content.aura_guided_mission.max_time_s;
     if (azami_s > 0 && (simdi - nav_wp_start_ms) > (uint32_t)azami_s * 1000UL) {
         gcs().send_text(MAV_SEVERITY_INFO, "GuidedMission: max time, moving on");
         return true;
     }
 
-    // Veri sessizligi. Sayac ILK VERIDEN degil ITEM GIRISINDEN isler: bu bir gorev
-    // item'i, dis bilgisayar hic konusmazsa gorevin orada asili kalmasi kabul
-    // edilemez. Operator esigi buna gore secmeli (yardimci bilgisayarin konusmaya
-    // baslamasi icin gereken sureden buyuk).
+    // Data silence. The counter runs from ITEM ENTRY, not from the FIRST DATA: this is a
+    // mission item, and if the external computer never speaks it is unacceptable for the
+    // mission to hang there. The operator must choose the threshold accordingly (larger
+    // than the time the companion computer needs to start talking).
     const uint32_t referans = (guided_veri_ms > nav_wp_start_ms) ? guided_veri_ms : nav_wp_start_ms;
     if ((simdi - referans) > esik_ms) {
         gcs().send_text(MAV_SEVERITY_INFO, "GuidedMission: setpoints stopped, moving on");
@@ -957,11 +957,11 @@ bool Sub::verify_aura_guided_mission(const AP_Mission::Mission_Command& cmd)
     return false;
 }
 
-// AURA: MAV_CMD_AURA_GUIDED_SETUP (31030) - guided overlay'i ac/kapa.
+// AURA: MAV_CMD_AURA_GUIDED_SETUP (31030) - turn the guided overlay on/off.
 //
-// Bir DO komutu: gorevi bloklamaz, yalnizca bayrak kurar. Gorev listesinde
-// sonradan kapali bir tanesi konursa o andan itibaren devre disi kalir, tekrar
-// acik konursa yeniden calisir - yani dinamik.
+// A DO command: it does not block the mission, it only sets a flag. If a later one in the
+// mission list is placed with it off, the overlay stays disabled from that moment on, and
+// if another is placed with it on it works again - that is, it is dynamic.
 void Sub::do_aura_guided_setup(const AP_Mission::Mission_Command& cmd)
 {
     guided_overlay_acik = (cmd.content.aura_guided_setup.enable != 0);
@@ -970,7 +970,7 @@ void Sub::do_aura_guided_setup(const AP_Mission::Mission_Command& cmd)
                               : 3000;
 
     if (!guided_overlay_acik && guided_overlay_etkin) {
-        // Kapatildi ama su an devredeydi: bacagi derhal geri ver.
+        // Turned off while it was engaged: hand the leg back immediately.
         mode_auto.guided_overlay_birak();
     }
 
@@ -978,7 +978,7 @@ void Sub::do_aura_guided_setup(const AP_Mission::Mission_Command& cmd)
                     guided_overlay_acik ? "on" : "off");
 }
 
-// NAV_ATTITUDE_TIME: sure dolunca tamamlanir.
+// NAV_ATTITUDE_TIME: completes when the time expires.
 bool Sub::verify_nav_attitude_time(const AP_Mission::Mission_Command& cmd)
 {
     return (AP_HAL::millis() - mode_auto.nav_attitude_time_start_ms())
@@ -1034,11 +1034,11 @@ bool Sub::verify_circle(const AP_Mission::Mission_Command& cmd)
             return false;
         }
         if (wp_nav.reached_wp_destination()) {
-            // Buradaki circle_center hesabi OLU KODDU: degisken kuruluyor, sartli olarak
-            // .xy()'si eziliyor ve hicbir yerde kullanilmadan kapsam disina cikiyordu.
-            // Merkez zaten do_circle -> auto_circle_movetoedge_start -> set_center()
-            // yolunda circle_nav'a yazildi; auto_circle_start() argumansizdir ve merkezi
-            // oradan okur. Kaldirildi.
+            // The circle_center computation here was DEAD CODE: the variable was built,
+            // its .xy() was conditionally overwritten, and it went out of scope without
+            // being used anywhere. The centre was already written into circle_nav on the
+            // do_circle -> auto_circle_movetoedge_start -> set_center() path;
+            // auto_circle_start() takes no arguments and reads the centre from there. Removed.
             mode_auto.auto_circle_start();
         }
         return false;
@@ -1047,8 +1047,8 @@ bool Sub::verify_circle(const AP_Mission::Mission_Command& cmd)
     return fabsf(sub.circle_nav.get_angle_total_rad()/M_2PI) >= daire_tur_hedefi;
 }
 
-// AURA: MAV_CMD_AURA_CIRCLE dogrulamasi. Tur sayimi verify_circle ile ayni; ayri
-// durmasinin sebebi kenar bacagindaki guard kapisi.
+// AURA: verification of MAV_CMD_AURA_CIRCLE. The turn counting is the same as
+// verify_circle; it stands separate because of the guard gate on the edge leg.
 bool Sub::verify_aura_circle(const AP_Mission::Mission_Command& cmd)
 {
     if (auto_mode == Auto_CircleMoveToEdge) {

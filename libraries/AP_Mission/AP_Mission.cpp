@@ -551,10 +551,10 @@ bool AP_Mission::is_nav_cmd(const Mission_Command& cmd)
             // must sit in the nav chain rather than run as a do-command beside one.
             cmd.id == MAV_CMD_AURA_POSITION_FIX ||
             cmd.id == MAV_CMD_AURA_CIRCLE ||
-            // Guided mission bir NAV komutudur: sirasi gelince gorevi BLOKLAR ve
-            // ancak veri kesilince (ya da azami sure dolunca) ilerler.
-            // MAV_CMD_AURA_GUIDED_SETUP BILEREK burada YOK - o bir DO komutu, gorevi
-            // bloklamamali, yalnizca bayrak kurmali.
+            // Guided mission is a NAV command: when its turn comes it BLOCKS the mission
+            // and only advances when the data stops (or the maximum time expires).
+            // MAV_CMD_AURA_GUIDED_SETUP is DELIBERATELY NOT here - it is a DO command, it
+            // must not block the mission, only set a flag.
             cmd.id == MAV_CMD_AURA_GUIDED_MISSION);
 }
 
@@ -1451,13 +1451,13 @@ MAV_MISSION_RESULT AP_Mission::mavlink_int_to_mission_cmd(const mavlink_mission_
 
     // AURA: fly a circle
     case MAV_CMD_AURA_GUIDED_MISSION:
-        // param1 = veri sessizligi zaman asimi (s). 0 = 3 s varsayilani: bir gorev
-        // item'i olarak sonsuza kadar beklemek yanlis, ama sifir da "hemen vazgec"
-        // olmamali.
+        // param1 = data silence timeout (s). 0 = the 3 s default: as a mission item it is
+        // wrong to wait for ever, but zero must not mean "give up immediately"
+        // either.
         cmd.content.aura_guided_mission.timeout_ms =
             roundf(constrain_float(packet.param1 * 1000.0f, 0, UINT16_MAX));
-        // param2 = azami sure (s). 0 = tavan yok; veri akmaya devam ettigi surece
-        // bacak surer.
+        // param2 = maximum time (s). 0 = no ceiling; the leg goes on for as long as
+        // the data keeps flowing.
         cmd.content.aura_guided_mission.max_time_s =
             roundf(constrain_float(packet.param2, 0, UINT16_MAX));
         break;
@@ -2053,7 +2053,7 @@ bool AP_Mission::mission_cmd_to_mavlink_int(const AP_Mission::Mission_Command& c
     case MAV_CMD_AURA_GUIDED_MISSION:
         packet.param1 = cmd.content.aura_guided_mission.timeout_ms * 0.001f;
         packet.param2 = cmd.content.aura_guided_mission.max_time_s;
-        // x/y/z kullanilmiyor; frame soylenmezse GCS onlari 1e7-olcekli derece sanar.
+        // x/y/z are unused; if the frame is not stated a GCS reads them as 1e7-scaled degrees.
         packet.frame = MAV_FRAME_MISSION;
         break;
 

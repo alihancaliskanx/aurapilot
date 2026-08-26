@@ -1,35 +1,35 @@
 #include "Sub.h"
 
 /*
- * mode_smart_rtl.cpp - AURA: gelinen izi geri surerek eve donus
+ * mode_smart_rtl.cpp - AURA: return home by retracing the track already travelled
  *
- * AP_SmartRTL, arac ilerledikce 3B kirinti noktalari biriktirir (NED metre, EKF
- * orijinine gore) ve arka planda hem sadelestirme (Ramer-Douglas-Peucker) hem de
- * dongu budama uygular. Bu mod o noktalari TERSTEN tuketir.
+ * AP_SmartRTL accumulates 3D breadcrumb points as the vehicle moves (NED metres,
+ * relative to the EKF origin) and in the background applies both simplification
+ * (Ramer-Douglas-Peucker) and loop pruning. This mode consumes those points BACKWARDS.
  *
- * Duz hat RTL'den farki, tam da bir AUV icin onemli olan sey: buz altinda, enkaz
- * icinde, iskele ayaklari arasinda ya da bir kablo/halat izlerken eve giden duz
- * cizgi ENGELDEN GECER. Gelinen yol ise tanim geregi gecilebilir.
+ * The difference from a straight-line RTL is exactly what matters for an AUV: under ice,
+ * inside a wreck, between pier piles or while following a cable/rope, the straight line
+ * home GOES THROUGH THE OBSTACLE. The path already travelled is by definition passable.
  *
- * Copter'in SmartRTL'i son noktanin 2 m ustune cikip INER; Rover'inki son noktada
- * durur. AUV icin dogru olan Rover'in sekli: burada inis/satha cikis YOKTUR.
+ * Copter's SmartRTL climbs 2 m above the last point and LANDS; Rover's stops at the last
+ * point. The right shape for an AUV is Rover's: there is NO landing/surfacing here.
  */
 
-// Cok fazla ardisik pop hatasindan sonra pes et (Copter'daki ile ayni butce).
+// Give up after too many consecutive pop failures (the same budget as in Copter).
 #define SRTL_POP_HATA_ZAMAN_MS  10000
 
 bool ModeSmartRtl::init(bool ignore_checks)
 {
     if (!sub.g2.smart_rtl.is_active()) {
-        // Kutuphane devre disi: ya SRTL_POINTS=0, ya tampon/konum 15 sn boyunca
-        // bozuk kaldi, ya da hic arm olunmadigi icin ev noktasi kaydedilmedi.
-        // Sessizce reddetmek yerine sebebi soyle - operator bunu ucus sirasinda
-        // ogrenmek zorunda.
+        // The library is disabled: either SRTL_POINTS=0, or the buffer/position stayed
+        // bad for 15 s, or the home point was never recorded because we never armed.
+        // Instead of refusing silently, say the reason - the operator has to learn
+        // this during the dive.
         gcs().send_text(MAV_SEVERITY_WARNING, "SmartRTL not active");
         return false;
     }
 
-    // wp_nav'i mevcut duruş noktasindan baslat. Hiz argumani verilmez -> WP_SPD.
+    // Start wp_nav from the current stopping point. No speed argument given -> WP_SPD.
     Vector3p durus_ned_m;
     sub.wp_nav.get_wp_stopping_point_NED_m(durus_ned_m);
     sub.wp_nav.wp_and_spline_init_m(0.0f, durus_ned_m);
@@ -41,40 +41,40 @@ bool ModeSmartRtl::init(bool ignore_checks)
     son_basarili_pop_ms = AP_HAL::millis();
     durum = Durum::YOL_TEMIZLIGI;
 
-    // Seyirde burun hat kerterizine donsun; kamera yonu isteniyorsa operator
-    // moddan cikip elle surer (SmartRTL bir kacis manevrasidir, foto bacagi degil).
+    // While transiting the nose turns to the leg bearing; if a camera heading is wanted the
+    // operator exits the mode and steers by hand (SmartRTL is an escape manoeuvre, not a photo leg).
     set_auto_yaw_mode(get_default_auto_yaw_mode(true));
 
     return true;
 }
 
-// 3 Hz zamanlayici gorevi. AP_SmartRTL basligi "3 Hz ya da daha hizli, ARAC HANGI
-// MODDA OLURSA OLSUN cagirin" diyor - kirinti yolu her modda birikmeli, yoksa
-// operator MANUAL'de dolasip sonra SmartRTL'e bastiginda ortada yol olmaz.
+// 3 Hz scheduler task. The AP_SmartRTL header says "call at 3 Hz or faster, NO MATTER
+// WHICH MODE THE VEHICLE IS IN" - the breadcrumb path must accumulate in every mode,
+// otherwise there is no path when the operator wanders in MANUAL and then hits SmartRTL.
 void ModeSmartRtl::save_position()
 {
-    // SmartRTL'in KENDISI calisirken nokta EKLENMEZ; yoksa geri surdugumuz yol
-    // kendini yeniden yazar ve arac hic eve varmaz.
+    // While SmartRTL ITSELF is running NO point is added; otherwise the path we are
+    // retracing rewrites itself and the vehicle never gets home.
     const bool kaydet = sub.motors.armed() && (sub.control_mode != Mode::Number::SMART_RTL);
     sub.g2.smart_rtl.update(sub.position_ok(), kaydet);
 }
 
 void ModeSmartRtl::cikis_temizligi()
 {
-    // Pop edilmis ama henuz varilmamis noktayi yola geri koy: aksi halde moddan
-    // her cikis izde bir delik acar.
+    // Put the popped but not-yet-reached point back on the path: otherwise every exit
+    // from the mode punches a hole in the track.
     if (tuketilmis_gecerli) {
         sub.g2.smart_rtl.add_point(tuketilmis_nokta_ned_m);
         tuketilmis_gecerli = false;
     }
-    // Bekleyen kapsamli temizlik istegini iptal et; birakilirsa arka plan
-    // temizligi kalici olarak bloke kalir.
+    // Cancel the pending thorough cleanup request; if it is left, the background
+    // cleanup stays permanently blocked.
     sub.g2.smart_rtl.cancel_request_for_thorough_cleanup();
 }
 
 void ModeSmartRtl::run()
 {
-    // Arac disarm ise: ArduSub disarm halde tutum stabilize etmez.
+    // If the vehicle is disarmed: ArduSub does not stabilize attitude while disarmed.
     if (!sub.motors.armed()) {
         sub.motors.set_desired_spool_state(AP_Motors::DesiredSpoolState::GROUND_IDLE);
         attitude_control->set_throttle_out(NEUTRAL_THROTTLE, true, sub.g.throttle_filt);
@@ -100,8 +100,8 @@ void ModeSmartRtl::run()
     wp_cikislarini_sur();
 }
 
-// Kutuphanenin kapsamli temizligi bitene kadar mevcut noktada bekle.
-// request_thorough_cleanup() bir MANDAL: true donene kadar tekrar tekrar cagrilir.
+// Wait at the current point until the library's thorough cleanup is finished.
+// request_thorough_cleanup() is a LATCH: it is called over and over until it returns true.
 void ModeSmartRtl::yol_temizligi_kos()
 {
     if (sub.g2.smart_rtl.request_thorough_cleanup()) {
@@ -117,19 +117,19 @@ void ModeSmartRtl::izi_sur_kos()
         return;
     }
 
-    // Varilan noktanin yedegi artik gerekmiyor.
+    // The backup of the point we reached is no longer needed.
     tuketilmis_gecerli = false;
 
     Vector3p nokta_ned_m;
     if (!sub.g2.smart_rtl.pop_point(nokta_ned_m)) {
-        // Semafor mesgul olabilir - bir sonraki dongude tekrar denenir.
+        // The semaphore may be busy - it is retried on the next loop.
         if (sub.g2.smart_rtl.get_num_points() == 0) {
-            // Yol tukendi: eve varildi.
+            // The path is exhausted: home has been reached.
             gcs().send_text(MAV_SEVERITY_INFO, "SmartRTL: path complete");
             durum = Durum::DERINLIKTE_TUT;
         } else if (AP_HAL::millis() - son_basarili_pop_ms > SRTL_POP_HATA_ZAMAN_MS) {
-            // Nokta var ama alinamiyor: burada durup tutmak, korlemesine
-            // ilerlemekten ya da satha firlamaktan iyidir.
+            // There are points but they cannot be taken: stopping and holding here is
+            // better than pressing on blindly or shooting up to the surface.
             gcs().send_text(MAV_SEVERITY_ERROR, "SmartRTL: path stalled, holding");
             durum = Durum::DERINLIKTE_TUT;
         }
@@ -140,41 +140,41 @@ void ModeSmartRtl::izi_sur_kos()
     tuketilmis_nokta_ned_m = nokta_ned_m;
     tuketilmis_gecerli = true;
 
-    // DIKKAT: Copter burada hedefe 2 m EKLER (son noktanin ustune inecegi icin).
-    // Burada oyle bir sey YOK - kirinti noktasi neredeyse oraya gidilir; satha
-    // cikmaya karsi koruma wp_cikislarini_sur() icindeki SERT satih tavanidir.
+    // CAUTION: Copter ADDS 2 m to the target here (because it will land on top of the
+    // last point). There is NO such thing here - we go exactly to the breadcrumb point;
+    // the protection against surfacing is the HARD surface ceiling in wp_cikislarini_sur().
     if (!sub.wp_nav.set_wp_destination_NED_m(nokta_ned_m)) {
         sub.failsafe_terrain_on_event();
         return;
     }
 
-    // Bir sonraki noktayi da bildir ki S-egrisi her kirintida durmasin.
+    // Report the next point as well so the S-curve does not stop at every breadcrumb.
     Vector3p sonraki_ned_m;
     if (sub.g2.smart_rtl.peek_point(sonraki_ned_m)) {
         sub.wp_nav.set_wp_destination_next_NED_m(sonraki_ned_m);
     }
 }
 
-// Son noktada istasyon tut. Hedef degistirilmez; wp_nav zaten oraya kilitli.
+// Station-keep at the last point. The target is not changed; wp_nav is already locked there.
 void ModeSmartRtl::tut_kos()
 {
 }
 
-// Ortak cikis yolu - govdesi ModeAuto::auto_wp_run'dan alindi. Copter'in
-// input_thrust_vector_heading() cagrisinin ArduSub'da karsiligi yoktur: 6 serbestlik
-// dereceli bir araçta yanal/ileri iticiler ayri surulur.
+// Common output path - its body was taken from ModeAuto::auto_wp_run. Copter's
+// input_thrust_vector_heading() call has no equivalent in ArduSub: on a vehicle with 6
+// degrees of freedom the lateral/forward thrusters are driven separately.
 void ModeSmartRtl::wp_cikislarini_sur()
 {
     sub.failsafe_terrain_set_status(sub.wp_nav.update_wpnav());
 
-    // SERT satih tavani (-0.30 m), komut edilen hedefe BAKILMADAN.
+    // HARD surface ceiling (-0.30 m), REGARDLESS of the commanded target.
     //
-    // Bu, bu moddaki en onemli AUV'e ozgu karardir. AP_SmartRTL'in ev noktasi
-    // set_home() ile ARM ANINDA kaydedilir; ROV'lar satihta arm edildigi icin son
-    // kirinti noktasi ~0 m derinliktedir. Tavansiz bir SmartRTL, gorevi tam da
-    // AURA'nin yasakladigi seyle bitirirdi: satha dikey cikis ve orada yatay seyir.
-    // Tavan aracin 0.3 m'den sigda kalmasini engeller; satha cikmak isteniyorsa
-    // operator moddan cikip SURFACE'a gecer.
+    // This is the most important AUV-specific decision in this mode. AP_SmartRTL's home
+    // point is recorded with set_home() AT THE MOMENT OF ARMING; because ROVs are armed at
+    // the surface, the last breadcrumb point sits at ~0 m depth. A SmartRTL without a
+    // ceiling would end the mission with exactly what AURA forbids: a vertical ascent to the
+    // surface and horizontal transit up there. The ceiling stops the vehicle going shallower
+    // than 0.3 m; if surfacing is wanted the operator exits the mode and goes to SURFACE.
     aura_satih_tavani_cekirdek(position_control, -0.30f, true);
 
     float lateral_out, forward_out;
