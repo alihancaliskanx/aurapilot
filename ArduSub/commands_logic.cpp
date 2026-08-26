@@ -21,7 +21,17 @@ bool Sub::start_command(const AP_Mission::Mission_Command& cmd)
     // NAV_SET_YAW_SPEED, AURA_ANCHOR and AURA_POSITION_FIX are nav commands without a
     // Location.
     // stored_in_location() is the correct predicate.
-    if (AP_Mission::is_nav_cmd(cmd) && AP_Mission::stored_in_location(cmd.id)) {
+    // NAV_GUIDED_ENABLE stored_in_location listesindedir ama tasidigi Location
+    // ATIL: do_nav_guided_enable yalnizca cmd.p1'i (ac/kapa bayragi) okur, irtifaya
+    // hic bakmaz. Kapiya takilmasi gercek bir kusurdu: mavui (ve stok QGC) bu komutu
+    // koordinat/irtifa BILDIRMEDEN tanimladigi icin SimpleMissionItem ona
+    // MAV_FRAME_MISSION veriyor; o cerceve ABSOLUTE'a cozuluyor, kapi "Bad alt frame"
+    // deyip start_command false donduruyor ve AP_Mission komutu SESSIZCE ATLIYOR.
+    // Yani menuden konan "Guided enable" hicbir sey yapmiyordu. SITL'de olculdu:
+    // "Mission: 2 GuidedEnable" hemen ardindan "Bad alt frame", sonra bir sonraki item.
+    const bool irtifasi_atil = (cmd.id == MAV_CMD_NAV_GUIDED_ENABLE);
+
+    if (AP_Mission::is_nav_cmd(cmd) && AP_Mission::stored_in_location(cmd.id) && !irtifasi_atil) {
         const Location &target_loc = cmd.content.location;
         auto alt_frame = target_loc.get_alt_frame();
 
