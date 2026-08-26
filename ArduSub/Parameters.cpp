@@ -682,6 +682,8 @@ const AP_Param::Info Sub::var_info[] = {
     // @User: Standard
     GSCALAR(surftrak_depth, "SURFTRAK_DEPTH", SURFTRAK_DEPTH_DEFAULT),
 
+#endif
+
     // @Param: SURFMDSW
     // @DisplayName: Mode after surfacing
     // @Description: Flight mode to enter once SURFACE mode has reached the surface (SURFACE_DEPTH). Set this to 9 (Surface) to stay in SURFACE mode instead: the vehicle then holds itself at SURFACE_DEPTH with balanced vertical thrust rather than continuing to command a climb, which keeps a negatively buoyant vehicle pinned at the surface without cavitating half-submerged thrusters. If the requested mode refuses to start (for example PosHold with no position estimate) the vehicle stays in SURFACE and holds, it does not keep climbing.
@@ -711,7 +713,6 @@ const AP_Param::Info Sub::var_info[] = {
     // @Range: 0 60
     // @User: Standard
     GSCALAR(anchor_data_timeout, "ANCHOR_DTIM", 3.0f),
-#endif
 
 #if AP_TERRAIN_AVAILABLE
     // @Group: TERRAIN_

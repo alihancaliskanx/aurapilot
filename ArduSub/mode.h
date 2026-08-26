@@ -411,14 +411,19 @@ protected:
     Mode::Number number() const override { return Mode::Number::ANCHOR; }
 
 private:
-    uint32_t giris_ms;          // moda girildigi an (ANCHOR_TIME buradan sayilir)
-    uint32_t son_veri_ms;       // son demir verisinin geldigi an; 0 = hic gelmedi
-    bool     mod_degistirildi;  // ANCHOR_MDSW'e bir kez gecmeyi denedik
-    bool     satihta_tut;       // hedef derinlik SURFACE_DEPTH'ten sig -> derinligi kilitle
-    float    hedef_d_m;         // kilitlenecek derinlik (D, asagi pozitif, m)
+    uint32_t giris_ms = 0;          // sayaclarin basladigi an (ARM ile birlikte)
+    uint32_t son_veri_ms = 0;       // son demir verisinin geldigi an; 0 = hic gelmedi
+    uint32_t son_deneme_ms = 0;     // ANCHOR_MDSW'e en son ne zaman gecmeye calistik
+    uint32_t son_uyari_ms = 0;      // reddedilme uyarisi en son ne zaman basildi
+    bool     yeniden_kilitle = false; // disarm'dan cikildi -> demir noktasi geri yazilmali
+    bool     hedef_var = false;     // kilitli bir nokta var mi
+    bool     satihta_tut = false;   // hedef derinlik SURFACE_DEPTH'ten sig
+    float    hedef_d_m = 0.0f;      // kilitli derinlik (D, asagi pozitif, m)
+    Vector3p hedef_ned_m;           // kilitli nokta (NED, m, EKF orijinine gore)
 
+    void hedefi_uygula(const Vector3p &istenen_ned_m, bool zorla);
     void nokta_kilitle(const Vector3f &konum_neu_cm);
-    void cikis_kosulu_denetle();
+    bool cikis_kosulu_denetle();
     void kontrolcuyu_sur();
 };
 
