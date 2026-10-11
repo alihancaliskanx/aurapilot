@@ -24,7 +24,7 @@ done
 
 BASE_PKGS="base-devel ccache git gsfonts tk wget gcc"
 SITL_PKGS="python-pip python-setuptools python-wheel python-wxpython opencv python-numpy python-scipy"
-PX4_PKGS="lib32-glibc zip zlib ncurses"
+PX4_PKGS="lib32-glibc zip ncurses"
 
 PYTHON_PKGS="future lxml pymavlink MAVProxy pexpect argparse matplotlib pyparsing geocoder pyserial empy==3.3.4 dronecan packaging setuptools wheel"
 
